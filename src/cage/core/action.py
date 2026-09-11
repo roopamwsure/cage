@@ -1,8 +1,7 @@
 from collections.abc import Mapping
 from dataclasses import dataclass
-from math import isfinite
-from types import MappingProxyType
 
+from cage.core._json import freeze_json_value
 from cage.core.identity import Agent, Principal, Resource
 
 
@@ -14,36 +13,6 @@ def _require_non_empty(value: str, field_name: str) -> None:
         raise ValueError(f"{field_name} must not be empty")
 
 
-def _freeze_json_value(value: object) -> object:
-    if value is None or isinstance(value, (str, bool, int)):
-        return value
-
-    if isinstance(value, float):
-        if not isfinite(value):
-            raise ValueError("JSON numbers must be finite")
-        return value
-
-    if isinstance(value, list):
-        return tuple(_freeze_json_value(item) for item in value)
-
-    if isinstance(value, Mapping):
-        frozen = {}
-
-        for key, item in value.items():
-            if not isinstance(key, str):
-                raise TypeError(
-                    "requested-effect parameter keys must be strings"
-                )
-
-            frozen[key] = _freeze_json_value(item)
-
-        return MappingProxyType(frozen)
-
-    raise TypeError(
-        "requested-effect parameters must contain only JSON-compatible values"
-    )
-
-
 @dataclass(frozen=True, slots=True)
 class RequestedEffect:
     parameters: Mapping[str, object]
@@ -52,7 +21,7 @@ class RequestedEffect:
         if not isinstance(self.parameters, Mapping):
             raise TypeError("parameters must be a mapping")
 
-        frozen_parameters = _freeze_json_value(self.parameters)
+        frozen_parameters = freeze_json_value(self.parameters)
         object.__setattr__(self, "parameters", frozen_parameters)
 
 
