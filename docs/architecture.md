@@ -121,3 +121,27 @@ It does not implement:
 - enterprise deployment
 - a new IAM system
 - a new policy language
+
+## Consequence Idempotency Semantics
+
+For v0.5, an idempotency key identifies one intended business consequence.
+
+Equivalent consequence requests are compared using:
+
+- action type
+- principal identity
+- resource identity
+- requested effect
+
+The following identities do not, by themselves, create a new consequence:
+
+- action identity
+- consequence identity proposed by a retry
+- agent identity
+- attempt identity
+- agent session
+- retry or replay number
+
+A reused idempotency key with materially different consequence semantics must result in an explicit conflict.
+
+This is a v0.5 contract and may be refined before the stable v1.0 Consequence specification.
