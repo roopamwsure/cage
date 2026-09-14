@@ -59,11 +59,12 @@ Equivalent requests using the same idempotency key resolve to the same Consequen
 Conflicting consequences using the same idempotency key fail explicitly.
 
 ## 8. NARROWED Semantics
-
-CAGE can preserve both:
+CAGE preserves both:
 
 - the originally requested effect
-- the more constrained permitted effect
+- an explicit permitted effect intended to be more constrained
+
+Determining whether the permitted effect is semantically more constrained is domain-specific and belongs to the supplied evaluation logic.
 
 ## 9. Generic Assurance Inputs
 
@@ -124,6 +125,9 @@ Automated tests demonstrate:
 - replay safety
 - idempotency conflict handling
 - NARROWED behavior
+- normalized assurance-input evaluation
+- no implicit allow behavior
+- Decision Proof assurance references
 - Warrant proof separation
 
 All tests must pass before v0.5 is considered complete.
@@ -140,6 +144,6 @@ v0.5 does not require:
 - post-quantum cryptography
 - AI intelligence
 - enterprise deployment
-- consequence lineage
+- full consequence graphs or advanced consequence lineage
 
 Those belong to later releases.
