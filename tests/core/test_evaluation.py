@@ -474,3 +474,326 @@ def test_evaluate_attempt_rejects_invalid_assurance_items(
         match=message,
     ):
         evaluate_attempt(**values)  # type: ignore[arg-type]
+
+def test_database_delete_uses_generic_evaluator() -> None:
+    action = Action(
+        action_id="action-db-delete-001",
+        action_type="database.delete",
+        principal=Principal(
+            principal_id="principal-db-admin",
+        ),
+        agent=Agent(
+            agent_id="agent-database-001",
+        ),
+        resource=Resource(
+            resource_id="database-customers",
+        ),
+        requested_effect=RequestedEffect(
+            parameters={
+                "database": "customers",
+                "environment": "production",
+            }
+        ),
+    )
+
+    consequence = Consequence(
+        consequence_id="consequence-db-delete-001",
+        idempotency_key="database-delete-customers-production",
+        action=action,
+    )
+
+    attempt = Attempt(
+        attempt_id="attempt-db-delete-001",
+        consequence=consequence,
+    )
+
+    approval = Approval(
+        approval_id="approval-db-delete-001",
+        approval_type="human",
+        approver="database-owner",
+        subject="consequence-db-delete-001",
+        source="approval-service",
+        scope={
+            "database": "customers",
+            "environment": "production",
+        },
+    )
+
+    context_item = Context(
+        context_id="context-db-delete-001",
+        context_type="runtime",
+        source="runtime-service",
+        values={
+            "maintenance_window": True,
+        },
+    )
+
+    def rule(
+        received_attempt: Attempt,
+        evidence: tuple[Evidence, ...],
+        standing: tuple[Standing, ...],
+        delegations: tuple[Delegation, ...],
+        approvals: tuple[Approval, ...],
+        context: tuple[Context, ...],
+    ) -> EvaluationOutcome:
+        assert (
+            received_attempt.consequence.action.action_type
+            == "database.delete"
+        )
+        assert approvals == (approval,)
+        assert context == (context_item,)
+
+        return EvaluationOutcome(
+            state=DecisionState.ADMITTED,
+        )
+
+    decision = evaluate_attempt(
+        decision_id="decision-db-delete-001",
+        attempt=attempt,
+        rule=rule,
+        approvals=[approval],
+        context=[context_item],
+    )
+
+    assert decision.state is DecisionState.ADMITTED
+    assert decision.attempt is attempt
+    assert (
+        decision.attempt.consequence.action.action_type
+        == "database.delete"
+    )        
+
+def test_access_grant_uses_generic_evaluator_with_narrowing() -> None:
+    action = Action(
+        action_id="action-access-grant-001",
+        action_type="access.grant",
+        principal=Principal(
+            principal_id="principal-security-admin",
+        ),
+        agent=Agent(
+            agent_id="agent-access-001",
+        ),
+        resource=Resource(
+            resource_id="account-production-001",
+        ),
+        requested_effect=RequestedEffect(
+            parameters={
+                "role": "global-admin",
+                "duration_minutes": 480,
+            }
+        ),
+    )
+
+    consequence = Consequence(
+        consequence_id="consequence-access-grant-001",
+        idempotency_key="access-grant-production-global-admin",
+        action=action,
+    )
+
+    attempt = Attempt(
+        attempt_id="attempt-access-grant-001",
+        consequence=consequence,
+    )
+
+    standing = Standing(
+        standing_id="standing-access-001",
+        standing_type="employment",
+        subject="principal-security-admin",
+        source="directory-service",
+        attributes={
+            "status": "active",
+        },
+    )
+
+    delegation = Delegation(
+        delegation_id="delegation-access-001",
+        delegator="principal-security-admin",
+        delegatee="agent-access-001",
+        source="delegation-service",
+        scope={
+            "action_type": "access.grant",
+        },
+    )
+
+    permitted_effect = RequestedEffect(
+        parameters={
+            "role": "scoped-operator",
+            "duration_minutes": 30,
+        }
+    )
+
+    def rule(
+        received_attempt: Attempt,
+        evidence: tuple[Evidence, ...],
+        standing_inputs: tuple[Standing, ...],
+        delegations: tuple[Delegation, ...],
+        approvals: tuple[Approval, ...],
+        context: tuple[Context, ...],
+    ) -> EvaluationOutcome:
+        assert (
+            received_attempt.consequence.action.action_type
+            == "access.grant"
+        )
+        assert standing_inputs == (standing,)
+        assert delegations == (delegation,)
+
+        return EvaluationOutcome(
+            state=DecisionState.NARROWED,
+            permitted_effect=permitted_effect,
+        )
+
+    decision = evaluate_attempt(
+        decision_id="decision-access-grant-001",
+        attempt=attempt,
+        rule=rule,
+        standing=[standing],
+        delegations=[delegation],
+    )
+
+    assert decision.state is DecisionState.NARROWED
+    assert decision.permitted_effect is permitted_effect
+    assert (
+        decision.attempt.consequence.action.requested_effect.parameters[
+            "role"
+        ]
+        == "global-admin"
+    )
+    assert decision.permitted_effect.parameters["role"] == "scoped-operator"
+
+def test_payment_release_uses_generic_evaluator_with_refusal() -> None:
+    action = Action(
+        action_id="action-payment-release-001",
+        action_type="payment.release",
+        principal=Principal(
+            principal_id="principal-finance-001",
+        ),
+        agent=Agent(
+            agent_id="agent-payment-001",
+        ),
+        resource=Resource(
+            resource_id="payment-system-001",
+        ),
+        requested_effect=RequestedEffect(
+            parameters={
+                "amount": 5000,
+                "currency": "USD",
+            }
+        ),
+    )
+
+    consequence = Consequence(
+        consequence_id="consequence-payment-release-001",
+        idempotency_key="payment-release-5000-usd",
+        action=action,
+    )
+
+    attempt = Attempt(
+        attempt_id="attempt-payment-release-001",
+        consequence=consequence,
+    )
+
+    evidence = Evidence(
+        evidence_id="evidence-payment-001",
+        evidence_type="risk-assessment",
+        subject="consequence-payment-release-001",
+        source="risk-service",
+        data={
+            "risk_level": "high",
+        },
+    )
+
+    approval = Approval(
+        approval_id="approval-payment-001",
+        approval_type="human",
+        approver="finance-manager",
+        subject="consequence-payment-release-001",
+        source="approval-service",
+        scope={
+            "amount": 5000,
+            "currency": "USD",
+        },
+    )
+
+    def rule(
+        received_attempt: Attempt,
+        evidence_inputs: tuple[Evidence, ...],
+        standing: tuple[Standing, ...],
+        delegations: tuple[Delegation, ...],
+        approvals: tuple[Approval, ...],
+        context: tuple[Context, ...],
+    ) -> EvaluationOutcome:
+        assert (
+            received_attempt.consequence.action.action_type
+            == "payment.release"
+        )
+        assert evidence_inputs == (evidence,)
+        assert approvals == (approval,)
+
+        return EvaluationOutcome(
+            state=DecisionState.REFUSED,
+        )
+
+    decision = evaluate_attempt(
+        decision_id="decision-payment-release-001",
+        attempt=attempt,
+        rule=rule,
+        evidence=[evidence],
+        approvals=[approval],
+    )
+
+    assert decision.state is DecisionState.REFUSED
+    assert decision.attempt is attempt
+    assert decision.permitted_effect is None
+    assert (
+        decision.attempt.consequence.action.action_type
+        == "payment.release"
+    )    
+
+def test_refused_evaluation_produces_only_a_decision() -> None:
+    attempt = _make_attempt()
+
+    def rule(
+        received_attempt: Attempt,
+        evidence: tuple[Evidence, ...],
+        standing: tuple[Standing, ...],
+        delegations: tuple[Delegation, ...],
+        approvals: tuple[Approval, ...],
+        context: tuple[Context, ...],
+    ) -> EvaluationOutcome:
+        return EvaluationOutcome(
+            state=DecisionState.REFUSED,
+        )
+
+    decision = evaluate_attempt(
+        decision_id="decision-refused-001",
+        attempt=attempt,
+        rule=rule,
+    )
+
+    assert decision.state is DecisionState.REFUSED
+    assert decision.attempt is attempt
+    assert decision.permitted_effect is None   
+
+def test_evaluation_does_not_claim_external_effect() -> None:
+    attempt = _make_attempt()
+
+    def rule(
+        received_attempt: Attempt,
+        evidence: tuple[Evidence, ...],
+        standing: tuple[Standing, ...],
+        delegations: tuple[Delegation, ...],
+        approvals: tuple[Approval, ...],
+        context: tuple[Context, ...],
+    ) -> EvaluationOutcome:
+        return EvaluationOutcome(
+            state=DecisionState.ADMITTED,
+        )
+
+    decision = evaluate_attempt(
+        decision_id="decision-admitted-001",
+        attempt=attempt,
+        rule=rule,
+    )
+
+    assert decision.state is DecisionState.ADMITTED
+    assert not hasattr(decision, "effect")
+    assert not hasattr(decision, "effect_state")     
