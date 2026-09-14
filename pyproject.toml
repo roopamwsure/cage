@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cage-assurance"
-version = "0.5.0.dev0"
+version = "0.5.0"
 description = "Control Assurance Governance Evaluation"
 requires-python = ">=3.11"
 dependencies = []
