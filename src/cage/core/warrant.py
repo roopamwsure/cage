@@ -3,7 +3,13 @@ from dataclasses import dataclass
 
 from cage.core.decision import Decision
 from cage.core.effect import Effect
-
+from cage.core.assurance import (
+    Approval,
+    Context,
+    Delegation,
+    Evidence,
+    Standing,
+)
 
 def _require_non_empty(value: str, field_name: str) -> None:
     if not isinstance(value, str):
@@ -59,6 +65,36 @@ class DecisionProof:
                 field_name,
             )
             object.__setattr__(self, field_name, frozen)
+
+def create_decision_proof(
+    *,
+    proof_id: str,
+    decision: Decision,
+    evidence: Sequence[Evidence] = (),
+    standing: Sequence[Standing] = (),
+    delegations: Sequence[Delegation] = (),
+    approvals: Sequence[Approval] = (),
+    context: Sequence[Context] = (),
+) -> DecisionProof:
+    return DecisionProof(
+        proof_id=proof_id,
+        decision=decision,
+        evidence_refs=tuple(
+            item.evidence_id for item in evidence
+        ),
+        standing_refs=tuple(
+            item.standing_id for item in standing
+        ),
+        delegation_refs=tuple(
+            item.delegation_id for item in delegations
+        ),
+        approval_refs=tuple(
+            item.approval_id for item in approvals
+        ),
+        context_refs=tuple(
+            item.context_id for item in context
+        ),
+    )            
 
 
 @dataclass(frozen=True, slots=True)

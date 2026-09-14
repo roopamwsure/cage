@@ -1,6 +1,13 @@
 import pytest
 
 from cage.core.action import Action, RequestedEffect
+from cage.core.assurance import (
+    Approval,
+    Context,
+    Delegation,
+    Evidence,
+    Standing,
+)
 from cage.core.attempt import Attempt
 from cage.core.consequence import Consequence
 from cage.core.decision import Decision, DecisionState
@@ -10,6 +17,7 @@ from cage.core.warrant import (
     DecisionProof,
     EffectProof,
     Warrant,
+    create_decision_proof,
 )
 
 
@@ -17,9 +25,15 @@ def _make_consequence() -> Consequence:
     action = Action(
         action_id="action-001",
         action_type="database.delete",
-        principal=Principal(principal_id="principal-123"),
-        agent=Agent(agent_id="agent-456"),
-        resource=Resource(resource_id="database-789"),
+        principal=Principal(
+            principal_id="principal-123",
+        ),
+        agent=Agent(
+            agent_id="agent-456",
+        ),
+        resource=Resource(
+            resource_id="database-789",
+        ),
         requested_effect=RequestedEffect(
             parameters={
                 "database": "customers",
@@ -35,16 +49,18 @@ def _make_consequence() -> Consequence:
     )
 
 
-def _make_decision() -> Decision:
-    attempt = Attempt(
+def _make_attempt() -> Attempt:
+    return Attempt(
         attempt_id="attempt-001",
         consequence=_make_consequence(),
     )
 
+
+def _make_decision() -> Decision:
     return Decision(
         decision_id="decision-001",
         state=DecisionState.ADMITTED,
-        attempt=attempt,
+        attempt=_make_attempt(),
     )
 
 
@@ -285,11 +301,13 @@ def test_warrant_rejects_proofs_for_different_consequences() -> None:
         action_id="action-999",
         action_type="database.delete",
         principal=Principal(
-            principal_id="principal-123"
+            principal_id="principal-123",
         ),
-        agent=Agent(agent_id="agent-456"),
+        agent=Agent(
+            agent_id="agent-456",
+        ),
         resource=Resource(
-            resource_id="database-999"
+            resource_id="database-999",
         ),
         requested_effect=RequestedEffect(
             parameters={
@@ -372,6 +390,7 @@ def test_admitted_decision_does_not_create_effect_proof() -> None:
         warrant.decision_proof.decision.state
         is DecisionState.ADMITTED
     )
+
     assert warrant.effect_proof is None
 
 
@@ -539,4 +558,148 @@ def test_warrant_update_preserves_consequence_identity() -> None:
     assert (
         second_warrant.previous_warrant_id
         == first_warrant.warrant_id
+    )
+
+
+def test_create_decision_proof_uses_assurance_input_ids() -> None:
+    attempt = _make_attempt()
+
+    decision = Decision(
+        decision_id="decision-proof-001",
+        state=DecisionState.ADMITTED,
+        attempt=attempt,
+    )
+
+    evidence = Evidence(
+        evidence_id="evidence-001",
+        evidence_type="risk-assessment",
+        subject="consequence-001",
+        source="risk-service",
+        data={
+            "risk_level": "low",
+        },
+    )
+
+    standing = Standing(
+        standing_id="standing-001",
+        standing_type="employment",
+        subject="principal-123",
+        source="directory-service",
+        attributes={
+            "status": "active",
+        },
+    )
+
+    delegation = Delegation(
+        delegation_id="delegation-001",
+        delegator="principal-123",
+        delegatee="agent-456",
+        source="delegation-service",
+        scope={
+            "action_type": "database.delete",
+        },
+    )
+
+    approval = Approval(
+        approval_id="approval-001",
+        approval_type="human",
+        approver="manager-123",
+        subject="consequence-001",
+        source="approval-service",
+        scope={
+            "environment": "production",
+        },
+    )
+
+    context_item = Context(
+        context_id="context-001",
+        context_type="runtime",
+        source="runtime-service",
+        values={
+            "environment": "production",
+        },
+    )
+
+    proof = create_decision_proof(
+        proof_id="proof-001",
+        decision=decision,
+        evidence=[evidence],
+        standing=[standing],
+        delegations=[delegation],
+        approvals=[approval],
+        context=[context_item],
+    )
+
+    assert proof.proof_id == "proof-001"
+    assert proof.decision is decision
+    assert proof.evidence_refs == ("evidence-001",)
+    assert proof.standing_refs == ("standing-001",)
+    assert proof.delegation_refs == ("delegation-001",)
+    assert proof.approval_refs == ("approval-001",)
+    assert proof.context_refs == ("context-001",)
+
+
+def test_create_decision_proof_accepts_empty_assurance_inputs() -> None:
+    attempt = _make_attempt()
+
+    decision = Decision(
+        decision_id="decision-proof-002",
+        state=DecisionState.REFUSED,
+        attempt=attempt,
+    )
+
+    proof = create_decision_proof(
+        proof_id="proof-002",
+        decision=decision,
+    )
+
+    assert proof.decision is decision
+    assert proof.evidence_refs == ()
+    assert proof.standing_refs == ()
+    assert proof.delegation_refs == ()
+    assert proof.approval_refs == ()
+    assert proof.context_refs == ()
+
+
+def test_create_decision_proof_preserves_reference_order() -> None:
+    attempt = _make_attempt()
+
+    decision = Decision(
+        decision_id="decision-proof-003",
+        state=DecisionState.ADMITTED,
+        attempt=attempt,
+    )
+
+    evidence_1 = Evidence(
+        evidence_id="evidence-001",
+        evidence_type="signal",
+        subject="consequence-001",
+        source="source-a",
+        data={
+            "value": "one",
+        },
+    )
+
+    evidence_2 = Evidence(
+        evidence_id="evidence-002",
+        evidence_type="signal",
+        subject="consequence-001",
+        source="source-b",
+        data={
+            "value": "two",
+        },
+    )
+
+    proof = create_decision_proof(
+        proof_id="proof-003",
+        decision=decision,
+        evidence=[
+            evidence_1,
+            evidence_2,
+        ],
+    )
+
+    assert proof.evidence_refs == (
+        "evidence-001",
+        "evidence-002",
     )
