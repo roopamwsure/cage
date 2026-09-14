@@ -1,5 +1,6 @@
 import pytest
 
+from cage.core.evaluation import EvaluationOutcome, evaluate_attempt
 from cage.core.action import Action, RequestedEffect
 from cage.core.assurance import (
     Approval,
@@ -8,6 +9,7 @@ from cage.core.assurance import (
     Evidence,
     Standing,
 )
+from cage.core.replay import create_replay_attempt
 from cage.core.attempt import Attempt
 from cage.core.consequence import Consequence
 from cage.core.decision import Decision, DecisionState
@@ -703,3 +705,249 @@ def test_create_decision_proof_preserves_reference_order() -> None:
         "evidence-001",
         "evidence-002",
     )
+
+def test_end_to_end_pre_effect_assurance_path() -> None:
+    consequence = _make_consequence()
+
+    attempt = Attempt(
+        attempt_id="attempt-e2e-001",
+        consequence=consequence,
+    )
+
+    evidence = Evidence(
+        evidence_id="evidence-e2e-001",
+        evidence_type="provider-policy-result",
+        subject="consequence-001",
+        source="provider-policy-service",
+        data={
+            "result": "allow",
+        },
+    )
+
+    standing = Standing(
+        standing_id="standing-e2e-001",
+        standing_type="employment",
+        subject="principal-123",
+        source="directory-service",
+        attributes={
+            "status": "active",
+        },
+    )
+
+    delegation = Delegation(
+        delegation_id="delegation-e2e-001",
+        delegator="principal-123",
+        delegatee="agent-456",
+        source="delegation-service",
+        scope={
+            "action_type": "database.delete",
+        },
+    )
+
+    approval = Approval(
+        approval_id="approval-e2e-001",
+        approval_type="human",
+        approver="database-owner",
+        subject="consequence-001",
+        source="approval-service",
+        scope={
+            "environment": "production",
+        },
+    )
+
+    context_item = Context(
+        context_id="context-e2e-001",
+        context_type="runtime",
+        source="runtime-service",
+        values={
+            "maintenance_window": True,
+        },
+    )
+
+    def rule(
+        received_attempt: Attempt,
+        received_evidence: tuple[Evidence, ...],
+        received_standing: tuple[Standing, ...],
+        received_delegations: tuple[Delegation, ...],
+        received_approvals: tuple[Approval, ...],
+        received_context: tuple[Context, ...],
+    ) -> EvaluationOutcome:
+        assert received_attempt is attempt
+        assert received_evidence == (evidence,)
+        assert received_standing == (standing,)
+        assert received_delegations == (delegation,)
+        assert received_approvals == (approval,)
+        assert received_context == (context_item,)
+
+        return EvaluationOutcome(
+            state=DecisionState.ADMITTED,
+        )
+
+    decision = evaluate_attempt(
+        decision_id="decision-e2e-001",
+        attempt=attempt,
+        rule=rule,
+        evidence=[evidence],
+        standing=[standing],
+        delegations=[delegation],
+        approvals=[approval],
+        context=[context_item],
+    )
+
+    decision_proof = create_decision_proof(
+        proof_id="decision-proof-e2e-001",
+        decision=decision,
+        evidence=[evidence],
+        standing=[standing],
+        delegations=[delegation],
+        approvals=[approval],
+        context=[context_item],
+    )
+
+    warrant = Warrant(
+        warrant_id="warrant-e2e-001",
+        schema_version="0.5-draft",
+        decision_proof=decision_proof,
+    )
+
+    assert decision.state is DecisionState.ADMITTED
+
+    assert decision_proof.evidence_refs == (
+        "evidence-e2e-001",
+    )
+    assert decision_proof.standing_refs == (
+        "standing-e2e-001",
+    )
+    assert decision_proof.delegation_refs == (
+        "delegation-e2e-001",
+    )
+    assert decision_proof.approval_refs == (
+        "approval-e2e-001",
+    )
+    assert decision_proof.context_refs == (
+        "context-e2e-001",
+    )
+
+    assert warrant.consequence_id == "consequence-001"
+    assert warrant.action_id == "action-001"
+    assert warrant.attempt_id == "attempt-e2e-001"
+
+    assert warrant.effect_proof is None   
+
+def test_replay_preserves_consequence_and_creates_new_decision_lineage() -> None:
+    consequence = _make_consequence()
+
+    first_attempt = Attempt(
+        attempt_id="attempt-replay-001",
+        consequence=consequence,
+    )
+
+    def first_rule(
+        received_attempt: Attempt,
+        evidence: tuple[Evidence, ...],
+        standing: tuple[Standing, ...],
+        delegations: tuple[Delegation, ...],
+        approvals: tuple[Approval, ...],
+        context: tuple[Context, ...],
+    ) -> EvaluationOutcome:
+        assert received_attempt is first_attempt
+
+        return EvaluationOutcome(
+            state=DecisionState.ESCALATED,
+        )
+
+    first_decision = evaluate_attempt(
+        decision_id="decision-replay-001",
+        attempt=first_attempt,
+        rule=first_rule,
+    )
+
+    second_attempt = create_replay_attempt(
+        previous_attempt=first_attempt,
+        attempt_id="attempt-replay-002",
+    )
+
+    approval = Approval(
+        approval_id="approval-replay-001",
+        approval_type="human",
+        approver="database-owner",
+        subject=consequence.consequence_id,
+        source="approval-service",
+        scope={
+            "database": "customers",
+            "environment": "production",
+        },
+    )
+
+    def second_rule(
+        received_attempt: Attempt,
+        evidence: tuple[Evidence, ...],
+        standing: tuple[Standing, ...],
+        delegations: tuple[Delegation, ...],
+        approvals: tuple[Approval, ...],
+        context: tuple[Context, ...],
+    ) -> EvaluationOutcome:
+        assert received_attempt is second_attempt
+        assert approvals == (approval,)
+
+        return EvaluationOutcome(
+            state=DecisionState.ADMITTED,
+        )
+
+    second_decision = evaluate_attempt(
+        decision_id="decision-replay-002",
+        attempt=second_attempt,
+        rule=second_rule,
+        approvals=[approval],
+    )
+
+    first_proof = create_decision_proof(
+        proof_id="decision-proof-replay-001",
+        decision=first_decision,
+    )
+
+    second_proof = create_decision_proof(
+        proof_id="decision-proof-replay-002",
+        decision=second_decision,
+        approvals=[approval],
+    )
+
+    first_warrant = Warrant(
+        warrant_id="warrant-replay-001",
+        schema_version="0.5-draft",
+        decision_proof=first_proof,
+    )
+
+    second_warrant = Warrant(
+        warrant_id="warrant-replay-002",
+        schema_version="0.5-draft",
+        decision_proof=second_proof,
+        previous_warrant_id=first_warrant.warrant_id,
+    )
+
+    assert first_attempt.consequence is consequence
+    assert second_attempt.consequence is consequence
+
+    assert second_attempt.attempt_id != first_attempt.attempt_id
+    assert (
+        second_attempt.previous_attempt_id
+        == first_attempt.attempt_id
+    )
+
+    assert first_decision.attempt is first_attempt
+    assert second_decision.attempt is second_attempt
+
+    assert first_decision.state is DecisionState.ESCALATED
+    assert second_decision.state is DecisionState.ADMITTED
+
+    assert (
+        first_warrant.consequence_id
+        == second_warrant.consequence_id
+    )
+    assert (
+        second_warrant.previous_warrant_id
+        == first_warrant.warrant_id
+    )
+
+    assert second_warrant.effect_proof is None
+     
