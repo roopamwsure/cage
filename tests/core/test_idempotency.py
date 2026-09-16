@@ -1,14 +1,15 @@
 import pytest
 
-from cage.core.attempt import Attempt
-from cage.core.replay import create_replay_attempt
 from cage.core.action import Action, RequestedEffect
+from cage.core.attempt import Attempt
 from cage.core.consequence import Consequence
 from cage.core.idempotency import (
     IdempotencyConflictError,
     IdempotencyRegistry,
 )
 from cage.core.identity import Agent, Principal, Resource
+from cage.core.replay import create_replay_attempt
+
 
 def _make_consequence(
     *,
@@ -37,12 +38,6 @@ def _make_consequence(
         requested_effect=RequestedEffect(
             parameters=parameters,
         ),
-    )
-
-    return Consequence(
-        consequence_id=consequence_id,
-        idempotency_key=idempotency_key,
-        action=action,
     )
 
     return Consequence(
@@ -132,6 +127,7 @@ def test_registry_requires_consequence() -> None:
     with pytest.raises(TypeError):
         registry.resolve("not-a-consequence")
 
+
 def test_parameter_order_does_not_change_consequence_semantics() -> None:
     registry = IdempotencyRegistry()
 
@@ -165,6 +161,7 @@ def test_parameter_order_does_not_change_consequence_semantics() -> None:
 
     assert resolved is original
 
+
 def test_same_key_with_different_action_type_conflicts() -> None:
     registry = IdempotencyRegistry()
 
@@ -182,6 +179,7 @@ def test_same_key_with_different_action_type_conflicts() -> None:
 
     with pytest.raises(IdempotencyConflictError):
         registry.resolve(conflicting)
+
 
 def test_same_key_with_different_resource_conflicts() -> None:
     registry = IdempotencyRegistry()
@@ -201,6 +199,7 @@ def test_same_key_with_different_resource_conflicts() -> None:
     with pytest.raises(IdempotencyConflictError):
         registry.resolve(conflicting)
 
+
 def test_same_key_with_different_principal_conflicts() -> None:
     registry = IdempotencyRegistry()
 
@@ -219,45 +218,6 @@ def test_same_key_with_different_principal_conflicts() -> None:
     with pytest.raises(IdempotencyConflictError):
         registry.resolve(conflicting)
 
-def test_retry_can_create_new_attempt_without_new_consequence() -> None:
-    registry = IdempotencyRegistry()
-
-    first_request = _make_consequence(
-        consequence_id="consequence-001",
-        action_id="action-001",
-    )
-
-    retry_request = _make_consequence(
-        consequence_id="consequence-999",
-        action_id="action-999",
-    )
-
-    original = registry.resolve(first_request)
-    resolved_retry = registry.resolve(retry_request)
-
-    first_attempt = Attempt(
-        attempt_id="attempt-001",
-        consequence=original,
-    )
-
-    retry_attempt = create_replay_attempt(
-        previous_attempt=first_attempt,
-        attempt_id="attempt-002",
-    )
-
-    assert resolved_retry is original
-
-    assert (
-        retry_attempt.consequence
-        is original
-    )
-
-    assert (
-        retry_attempt.consequence.consequence_id
-        == "consequence-001"
-    )
-
-    assert retry_attempt.attempt_id == "attempt-002"
 
 def test_retry_can_create_new_attempt_without_new_consequence() -> None:
     registry = IdempotencyRegistry()
@@ -298,6 +258,7 @@ def test_retry_can_create_new_attempt_without_new_consequence() -> None:
     )
 
     assert retry_attempt.attempt_id == "attempt-002"
+
 
 def test_same_key_and_intent_can_resolve_across_agents() -> None:
     registry = IdempotencyRegistry()
@@ -318,4 +279,4 @@ def test_same_key_and_intent_can_resolve_across_agents() -> None:
     resolved = registry.resolve(retry)
 
     assert resolved is original
-    assert resolved.consequence_id == "consequence-001"                
+    assert resolved.consequence_id == "consequence-001"
