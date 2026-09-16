@@ -1,8 +1,6 @@
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from cage.core.decision import Decision
-from cage.core.effect import Effect
 from cage.core.assurance import (
     Approval,
     Context,
@@ -10,13 +8,27 @@ from cage.core.assurance import (
     Evidence,
     Standing,
 )
+from cage.core.decision import Decision
+from cage.core.effect import Effect, EffectState
+from cage.core.verification import (
+    EffectVerificationResult,
+    VerificationState,
+)
 
-def _require_non_empty(value: str, field_name: str) -> None:
+
+def _require_non_empty(
+    value: str,
+    field_name: str,
+) -> None:
     if not isinstance(value, str):
-        raise TypeError(f"{field_name} must be a string")
+        raise TypeError(
+            f"{field_name} must be a string"
+        )
 
     if not value.strip():
-        raise ValueError(f"{field_name} must not be empty")
+        raise ValueError(
+            f"{field_name} must not be empty"
+        )
 
 
 def _freeze_references(
@@ -24,15 +36,22 @@ def _freeze_references(
     field_name: str,
 ) -> tuple[str, ...]:
     if isinstance(references, str):
-        raise TypeError(f"{field_name} must be a sequence of strings")
+        raise TypeError(
+            f"{field_name} must be a sequence of strings"
+        )
 
     if not isinstance(references, Sequence):
-        raise TypeError(f"{field_name} must be a sequence of strings")
+        raise TypeError(
+            f"{field_name} must be a sequence of strings"
+        )
 
     frozen = tuple(references)
 
     for reference in frozen:
-        _require_non_empty(reference, field_name)
+        _require_non_empty(
+            reference,
+            field_name,
+        )
 
     return frozen
 
@@ -48,10 +67,18 @@ class DecisionProof:
     context_refs: Sequence[str] = ()
 
     def __post_init__(self) -> None:
-        _require_non_empty(self.proof_id, "proof_id")
+        _require_non_empty(
+            self.proof_id,
+            "proof_id",
+        )
 
-        if not isinstance(self.decision, Decision):
-            raise TypeError("decision must be a Decision")
+        if not isinstance(
+            self.decision,
+            Decision,
+        ):
+            raise TypeError(
+                "decision must be a Decision"
+            )
 
         for field_name in (
             "evidence_refs",
@@ -64,7 +91,13 @@ class DecisionProof:
                 getattr(self, field_name),
                 field_name,
             )
-            object.__setattr__(self, field_name, frozen)
+
+            object.__setattr__(
+                self,
+                field_name,
+                frozen,
+            )
+
 
 def create_decision_proof(
     *,
@@ -80,33 +113,137 @@ def create_decision_proof(
         proof_id=proof_id,
         decision=decision,
         evidence_refs=tuple(
-            item.evidence_id for item in evidence
+            item.evidence_id
+            for item in evidence
         ),
         standing_refs=tuple(
-            item.standing_id for item in standing
+            item.standing_id
+            for item in standing
         ),
         delegation_refs=tuple(
-            item.delegation_id for item in delegations
+            item.delegation_id
+            for item in delegations
         ),
         approval_refs=tuple(
-            item.approval_id for item in approvals
+            item.approval_id
+            for item in approvals
         ),
         context_refs=tuple(
-            item.context_id for item in context
+            item.context_id
+            for item in context
         ),
-    )            
+    )
 
 
 @dataclass(frozen=True, slots=True)
 class EffectProof:
     proof_id: str
     effect: Effect
+    verification: EffectVerificationResult
 
     def __post_init__(self) -> None:
-        _require_non_empty(self.proof_id, "proof_id")
+        _require_non_empty(
+            self.proof_id,
+            "proof_id",
+        )
 
-        if not isinstance(self.effect, Effect):
-            raise TypeError("effect must be an Effect")
+        if not isinstance(
+            self.effect,
+            Effect,
+        ):
+            raise TypeError(
+                "effect must be an Effect"
+            )
+
+        if not isinstance(
+            self.verification,
+            EffectVerificationResult,
+        ):
+            raise TypeError(
+                "verification must be an EffectVerificationResult"
+            )
+
+        effect_consequence_id = (
+            self.effect
+            .consequence
+            .consequence_id
+        )
+
+        verification_consequence_id = (
+            self.verification
+            .consequence
+            .consequence_id
+        )
+
+        if (
+            effect_consequence_id
+            != verification_consequence_id
+        ):
+            raise ValueError(
+                "effect and verification must refer "
+                "to the same consequence"
+            )
+
+        expected_effect_state = _effect_state_for_verification(
+            self.verification.state
+        )
+
+        if self.effect.state is not expected_effect_state:
+            raise ValueError(
+                "effect state does not match "
+                "verification state"
+            )
+
+        if (
+            tuple(self.effect.verification_refs)
+            != tuple(self.verification.references)
+        ):
+            raise ValueError(
+                "effect verification_refs do not match "
+                "verification references"
+            )
+
+    @property
+    def verification_id(self) -> str:
+        return self.verification.verification_id
+
+    @property
+    def adapter_result_id(self) -> str:
+        return self.verification.adapter_result.result_id
+
+    @property
+    def execution_attempt_id(self) -> str:
+        return (
+            self.verification
+            .execution_attempt
+            .execution_attempt_id
+        )
+
+
+def _effect_state_for_verification(
+    state: VerificationState,
+) -> EffectState:
+    if state is VerificationState.VERIFIED_BOUND:
+        return EffectState.BOUND
+
+    if state is VerificationState.VERIFIED_NO_BIND:
+        return EffectState.NO_BIND
+
+    return EffectState.EFFECT_UNKNOWN
+
+
+def create_effect_proof(
+    *,
+    proof_id: str,
+    effect: Effect,
+    verification: EffectVerificationResult,
+) -> EffectProof:
+    return EffectProof(
+        proof_id=proof_id,
+        effect=effect,
+        verification=verification,
+    )
+
 
 @dataclass(frozen=True, slots=True)
 class Warrant:
@@ -117,17 +254,30 @@ class Warrant:
     previous_warrant_id: str | None = None
 
     def __post_init__(self) -> None:
-        _require_non_empty(self.warrant_id, "warrant_id")
-        _require_non_empty(self.schema_version, "schema_version")
+        _require_non_empty(
+            self.warrant_id,
+            "warrant_id",
+        )
 
-        if not isinstance(self.decision_proof, DecisionProof):
+        _require_non_empty(
+            self.schema_version,
+            "schema_version",
+        )
+
+        if not isinstance(
+            self.decision_proof,
+            DecisionProof,
+        ):
             raise TypeError(
                 "decision_proof must be a DecisionProof"
             )
 
         if (
             self.effect_proof is not None
-            and not isinstance(self.effect_proof, EffectProof)
+            and not isinstance(
+                self.effect_proof,
+                EffectProof,
+            )
         ):
             raise TypeError(
                 "effect_proof must be an EffectProof or None"
@@ -155,7 +305,10 @@ class Warrant:
                 .consequence_id
             )
 
-            if decision_consequence_id != effect_consequence_id:
+            if (
+                decision_consequence_id
+                != effect_consequence_id
+            ):
                 raise ValueError(
                     "decision proof and effect proof must refer "
                     "to the same consequence"
@@ -189,4 +342,25 @@ class Warrant:
             .decision
             .attempt
             .attempt_id
-        )        
+        )
+
+    @property
+    def execution_attempt_id(self) -> str | None:
+        if self.effect_proof is None:
+            return None
+
+        return self.effect_proof.execution_attempt_id
+
+    @property
+    def adapter_result_id(self) -> str | None:
+        if self.effect_proof is None:
+            return None
+
+        return self.effect_proof.adapter_result_id
+
+    @property
+    def verification_id(self) -> str | None:
+        if self.effect_proof is None:
+            return None
+
+        return self.effect_proof.verification_id

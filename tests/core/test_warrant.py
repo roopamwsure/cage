@@ -14,12 +14,23 @@ from cage.core.attempt import Attempt
 from cage.core.consequence import Consequence
 from cage.core.decision import Decision, DecisionState
 from cage.core.effect import Effect, EffectState
+from cage.core.adapter import (
+    AdapterExecutionResult,
+    AdapterExecutionState,
+)
+from cage.core.execution import ExecutionAttempt
+from cage.core.verification import (
+    EffectVerificationResult,
+    VerificationState,
+)
+
 from cage.core.identity import Agent, Principal, Resource
 from cage.core.warrant import (
     DecisionProof,
     EffectProof,
     Warrant,
     create_decision_proof,
+    create_effect_proof,
 )
 
 
@@ -50,6 +61,47 @@ def _make_consequence() -> Consequence:
         action=action,
     )
 
+
+def _make_verification_for_effect(
+    effect: Effect,
+    *,
+    verification_id: str = "verification-001",
+    execution_attempt_id: str = "execution-attempt-001",
+    adapter_result_id: str = "adapter-result-001",
+) -> EffectVerificationResult:
+    decision = _make_decision_for_consequence(
+        effect.consequence
+    )
+
+    execution_attempt = ExecutionAttempt(
+        execution_attempt_id=execution_attempt_id,
+        decision=decision,
+    )
+
+    adapter_result = AdapterExecutionResult(
+        result_id=adapter_result_id,
+        execution_attempt=execution_attempt,
+        state=AdapterExecutionState.ACKNOWLEDGED,
+        references=[
+            "request-id:123",
+        ],
+    )
+
+    if effect.state is EffectState.BOUND:
+        verification_state = VerificationState.VERIFIED_BOUND
+
+    elif effect.state is EffectState.NO_BIND:
+        verification_state = VerificationState.VERIFIED_NO_BIND
+
+    else:
+        verification_state = VerificationState.INCONCLUSIVE
+
+    return EffectVerificationResult(
+        verification_id=verification_id,
+        adapter_result=adapter_result,
+        state=verification_state,
+        references=effect.verification_refs,
+    )
 
 def _make_attempt() -> Attempt:
     return Attempt(
@@ -132,15 +184,26 @@ def test_effect_proof_wraps_effect_assertion() -> None:
         ],
     )
 
-    proof = EffectProof(
+    verification = _make_verification_for_effect(effect)
+
+    effect_proof = EffectProof(
         proof_id="effect-proof-001",
         effect=effect,
+        verification=verification,
     )
 
-    assert proof.effect.state is EffectState.BOUND
+    assert effect_proof.effect is effect
+    assert effect_proof.verification is verification
+    assert effect_proof.effect.state is EffectState.BOUND
     assert (
-        proof.effect.consequence.consequence_id
+        effect_proof.effect.consequence.consequence_id
         == "consequence-001"
+    )
+    assert effect_proof.verification_id == "verification-001"
+    assert effect_proof.adapter_result_id == "adapter-result-001"
+    assert (
+        effect_proof.execution_attempt_id
+        == "execution-attempt-001"
     )
 
 
@@ -151,12 +214,16 @@ def test_effect_proof_can_preserve_explicit_uncertainty() -> None:
         consequence=_make_consequence(),
     )
 
+    verification = _make_verification_for_effect(effect)
+
     proof = EffectProof(
         proof_id="effect-proof-001",
         effect=effect,
+        verification=verification,
     )
 
     assert proof.effect.state is EffectState.EFFECT_UNKNOWN
+    assert proof.verification.state is VerificationState.INCONCLUSIVE
 
 
 def test_decision_proof_requires_decision() -> None:
@@ -168,11 +235,237 @@ def test_decision_proof_requires_decision() -> None:
 
 
 def test_effect_proof_requires_effect() -> None:
-    with pytest.raises(TypeError):
+    valid_effect = Effect(
+        effect_id="effect-valid-001",
+        state=EffectState.EFFECT_UNKNOWN,
+        consequence=_make_consequence(),
+    )
+
+    verification = _make_verification_for_effect(
+        valid_effect
+    )
+
+    with pytest.raises(
+        TypeError,
+        match="effect must be an Effect",
+    ):
         EffectProof(
             proof_id="effect-proof-001",
-            effect="bound",
+            effect="bound",  # type: ignore[arg-type]
+            verification=verification,
         )
+
+
+
+def test_effect_proof_requires_verification_result() -> None:
+    effect = Effect(
+        effect_id="effect-001",
+        state=EffectState.EFFECT_UNKNOWN,
+        consequence=_make_consequence(),
+    )
+
+    with pytest.raises(
+        TypeError,
+        match=(
+            "verification must be an "
+            "EffectVerificationResult"
+        ),
+    ):
+        EffectProof(
+            proof_id="effect-proof-001",
+            effect=effect,
+            verification="verification-001",  # type: ignore[arg-type]
+        )
+
+
+def test_effect_proof_rejects_mismatched_effect_state() -> None:
+    consequence = _make_consequence()
+
+    effect = Effect(
+        effect_id="effect-001",
+        state=EffectState.BOUND,
+        consequence=consequence,
+        verification_refs=[
+            "authoritative-record:123",
+        ],
+    )
+
+    decision = _make_decision_for_consequence(
+        consequence
+    )
+
+    execution_attempt = ExecutionAttempt(
+        execution_attempt_id="execution-attempt-001",
+        decision=decision,
+    )
+
+    adapter_result = AdapterExecutionResult(
+        result_id="adapter-result-001",
+        execution_attempt=execution_attempt,
+        state=AdapterExecutionState.ACKNOWLEDGED,
+    )
+
+    verification = EffectVerificationResult(
+        verification_id="verification-001",
+        adapter_result=adapter_result,
+        state=VerificationState.VERIFIED_NO_BIND,
+        references=[
+            "authoritative-record:123",
+        ],
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=(
+            "effect state does not match "
+            "verification state"
+        ),
+    ):
+        EffectProof(
+            proof_id="effect-proof-001",
+            effect=effect,
+            verification=verification,
+        )
+
+
+def test_effect_proof_rejects_mismatched_verification_references() -> None:
+    consequence = _make_consequence()
+
+    effect = Effect(
+        effect_id="effect-001",
+        state=EffectState.BOUND,
+        consequence=consequence,
+        verification_refs=[
+            "authoritative-record:effect",
+        ],
+    )
+
+    decision = _make_decision_for_consequence(
+        consequence
+    )
+
+    execution_attempt = ExecutionAttempt(
+        execution_attempt_id="execution-attempt-001",
+        decision=decision,
+    )
+
+    adapter_result = AdapterExecutionResult(
+        result_id="adapter-result-001",
+        execution_attempt=execution_attempt,
+        state=AdapterExecutionState.ACKNOWLEDGED,
+    )
+
+    verification = EffectVerificationResult(
+        verification_id="verification-001",
+        adapter_result=adapter_result,
+        state=VerificationState.VERIFIED_BOUND,
+        references=[
+            "authoritative-record:verification",
+        ],
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=(
+            "effect verification_refs do not match "
+            "verification references"
+        ),
+    ):
+        EffectProof(
+            proof_id="effect-proof-001",
+            effect=effect,
+            verification=verification,
+        )
+
+
+def test_effect_proof_rejects_different_verification_consequence() -> None:
+    effect = Effect(
+        effect_id="effect-001",
+        state=EffectState.EFFECT_UNKNOWN,
+        consequence=_make_consequence(),
+    )
+
+    different_action = Action(
+        action_id="action-999",
+        action_type="database.delete",
+        principal=Principal(
+            principal_id="principal-123",
+        ),
+        agent=Agent(
+            agent_id="agent-456",
+        ),
+        resource=Resource(
+            resource_id="database-999",
+        ),
+        requested_effect=RequestedEffect(
+            parameters={
+                "database": "payroll",
+                "environment": "production",
+            }
+        ),
+    )
+
+    different_consequence = Consequence(
+        consequence_id="consequence-999",
+        idempotency_key="delete-payroll-production",
+        action=different_action,
+    )
+
+    different_effect = Effect(
+        effect_id="effect-999",
+        state=EffectState.EFFECT_UNKNOWN,
+        consequence=different_consequence,
+    )
+
+    verification = _make_verification_for_effect(
+        different_effect,
+        verification_id="verification-999",
+        execution_attempt_id="execution-attempt-999",
+        adapter_result_id="adapter-result-999",
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=(
+            "effect and verification must refer "
+            "to the same consequence"
+        ),
+    ):
+        EffectProof(
+            proof_id="effect-proof-001",
+            effect=effect,
+            verification=verification,
+        )
+
+
+def test_create_effect_proof_preserves_verified_lineage() -> None:
+    effect = Effect(
+        effect_id="effect-001",
+        state=EffectState.BOUND,
+        consequence=_make_consequence(),
+        verification_refs=[
+            "authoritative-record:123",
+        ],
+    )
+
+    verification = _make_verification_for_effect(
+        effect
+    )
+
+    proof = create_effect_proof(
+        proof_id="effect-proof-001",
+        effect=effect,
+        verification=verification,
+    )
+
+    assert proof.effect is effect
+    assert proof.verification is verification
+    assert proof.verification_id == "verification-001"
+    assert proof.adapter_result_id == "adapter-result-001"
+    assert (
+        proof.execution_attempt_id
+        == "execution-attempt-001"
+    )
 
 
 def test_warrant_can_exist_before_effect_proof() -> None:
@@ -221,9 +514,12 @@ def test_warrant_combines_decision_and_effect_proofs() -> None:
         ],
     )
 
+    verification = _make_verification_for_effect(effect)
+
     effect_proof = EffectProof(
         proof_id="effect-proof-001",
         effect=effect,
+        verification=verification,
     )
 
     warrant = Warrant(
@@ -244,6 +540,9 @@ def test_warrant_combines_decision_and_effect_proofs() -> None:
     )
 
     assert warrant.consequence_id == "consequence-001"
+    assert warrant.execution_attempt_id == "execution-attempt-001"
+    assert warrant.adapter_result_id == "adapter-result-001"
+    assert warrant.verification_id == "verification-001"
 
 
 def test_warrant_can_preserve_unknown_effect() -> None:
@@ -264,9 +563,12 @@ def test_warrant_can_preserve_unknown_effect() -> None:
         consequence=consequence,
     )
 
+    verification = _make_verification_for_effect(effect)
+
     effect_proof = EffectProof(
         proof_id="effect-proof-001",
         effect=effect,
+        verification=verification,
     )
 
     warrant = Warrant(
@@ -334,12 +636,26 @@ def test_warrant_rejects_proofs_for_different_consequences() -> None:
         ],
     )
 
+    verification = _make_verification_for_effect(
+        effect,
+        verification_id="verification-999",
+        execution_attempt_id="execution-attempt-999",
+        adapter_result_id="adapter-result-999",
+    )
+
     effect_proof = EffectProof(
         proof_id="effect-proof-999",
         effect=effect,
+        verification=verification,
     )
 
-    with pytest.raises(ValueError):
+    with pytest.raises(
+        ValueError,
+        match=(
+            "decision proof and effect proof must refer "
+            "to the same consequence"
+        ),
+    ):
         Warrant(
             warrant_id="warrant-001",
             schema_version="0.5-draft",
@@ -427,6 +743,9 @@ def test_decision_only_warrant_is_distinct_from_unknown_effect() -> None:
         effect_proof=EffectProof(
             proof_id="effect-proof-001",
             effect=unknown_effect,
+            verification=_make_verification_for_effect(
+                unknown_effect
+            ),
         ),
         previous_warrant_id="warrant-001",
     )
@@ -491,9 +810,12 @@ def test_admitted_decision_and_no_bind_effect_can_coexist() -> None:
         ],
     )
 
+    verification = _make_verification_for_effect(effect)
+
     effect_proof = EffectProof(
         proof_id="effect-proof-001",
         effect=effect,
+        verification=verification,
     )
 
     warrant = Warrant(
@@ -548,6 +870,9 @@ def test_warrant_update_preserves_consequence_identity() -> None:
         effect_proof=EffectProof(
             proof_id="effect-proof-001",
             effect=effect,
+            verification=_make_verification_for_effect(
+                effect
+            ),
         ),
         previous_warrant_id=first_warrant.warrant_id,
     )
