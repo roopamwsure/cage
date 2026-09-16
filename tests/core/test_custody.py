@@ -2,10 +2,13 @@ import pytest
 
 from cage.core.action import Action, RequestedEffect
 from cage.core.attempt import Attempt
+from cage.core.capability import ExecutionCapability
 from cage.core.consequence import Consequence
 from cage.core.custody import (
+    CapabilityMismatchError,
     CustodyIneligibleError,
     select_effect_for_custody,
+    validate_capability_for_custody,
 )
 from cage.core.decision import Decision, DecisionState
 from cage.core.identity import Agent, Principal, Resource
@@ -156,3 +159,153 @@ def test_narrowed_original_effect_remains_preserved() -> None:
         original_effect.parameters["duration_minutes"]
         == 480
     )
+
+
+def test_matching_capability_is_valid_for_custody() -> None:
+    attempt = _make_attempt()
+
+    decision = Decision(
+        decision_id="decision-admitted-001",
+        state=DecisionState.ADMITTED,
+        attempt=attempt,
+    )
+
+    capability = ExecutionCapability(
+        capability_id="capability-001",
+        consequence_id=attempt.consequence.consequence_id,
+        action_type=attempt.consequence.action.action_type,
+        resource_id=(
+            attempt.consequence.action.resource.resource_id
+        ),
+    )
+
+    validate_capability_for_custody(
+        decision=decision,
+        capability=capability,
+    )
+
+
+def test_capability_rejects_wrong_consequence() -> None:
+    attempt = _make_attempt()
+
+    decision = Decision(
+        decision_id="decision-admitted-001",
+        state=DecisionState.ADMITTED,
+        attempt=attempt,
+    )
+
+    capability = ExecutionCapability(
+        capability_id="capability-001",
+        consequence_id="consequence-999",
+        action_type=attempt.consequence.action.action_type,
+        resource_id=(
+            attempt.consequence.action.resource.resource_id
+        ),
+    )
+
+    with pytest.raises(
+        CapabilityMismatchError,
+        match=(
+            "capability consequence_id does not match "
+            "decision consequence"
+        ),
+    ):
+        validate_capability_for_custody(
+            decision=decision,
+            capability=capability,
+        )
+
+
+def test_capability_rejects_wrong_action_type() -> None:
+    attempt = _make_attempt()
+
+    decision = Decision(
+        decision_id="decision-admitted-001",
+        state=DecisionState.ADMITTED,
+        attempt=attempt,
+    )
+
+    capability = ExecutionCapability(
+        capability_id="capability-001",
+        consequence_id=attempt.consequence.consequence_id,
+        action_type="payment.release",
+        resource_id=(
+            attempt.consequence.action.resource.resource_id
+        ),
+    )
+
+    with pytest.raises(
+        CapabilityMismatchError,
+        match=(
+            "capability action_type does not match "
+            "decision action"
+        ),
+    ):
+        validate_capability_for_custody(
+            decision=decision,
+            capability=capability,
+        )
+
+
+def test_capability_rejects_wrong_resource() -> None:
+    attempt = _make_attempt()
+
+    decision = Decision(
+        decision_id="decision-admitted-001",
+        state=DecisionState.ADMITTED,
+        attempt=attempt,
+    )
+
+    capability = ExecutionCapability(
+        capability_id="capability-001",
+        consequence_id=attempt.consequence.consequence_id,
+        action_type=attempt.consequence.action.action_type,
+        resource_id="account-999",
+    )
+
+    with pytest.raises(
+        CapabilityMismatchError,
+        match=(
+            "capability resource_id does not match "
+            "decision resource"
+        ),
+    ):
+        validate_capability_for_custody(
+            decision=decision,
+            capability=capability,
+        )
+
+
+def test_validate_capability_requires_decision() -> None:
+    capability = ExecutionCapability(
+        capability_id="capability-001",
+        consequence_id="consequence-001",
+        action_type="access.grant",
+        resource_id="account-789",
+    )
+
+    with pytest.raises(
+        TypeError,
+        match="decision must be a Decision",
+    ):
+        validate_capability_for_custody(
+            decision="decision-001",  # type: ignore[arg-type]
+            capability=capability,
+        )
+
+
+def test_validate_capability_requires_execution_capability() -> None:
+    decision = Decision(
+        decision_id="decision-admitted-001",
+        state=DecisionState.ADMITTED,
+        attempt=_make_attempt(),
+    )
+
+    with pytest.raises(
+        TypeError,
+        match="capability must be an ExecutionCapability",
+    ):
+        validate_capability_for_custody(
+            decision=decision,
+            capability="capability-001",  # type: ignore[arg-type]
+        )
