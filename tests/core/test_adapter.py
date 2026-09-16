@@ -7,6 +7,7 @@ from cage.core.adapter import (
     EffectAdapter,
 )
 from cage.core.attempt import Attempt
+from cage.core.capability import ExecutionCapability
 from cage.core.consequence import Consequence
 from cage.core.decision import Decision, DecisionState
 from cage.core.execution import ExecutionAttempt
@@ -54,6 +55,21 @@ def _make_execution_attempt() -> ExecutionAttempt:
     return ExecutionAttempt(
         execution_attempt_id="execution-attempt-001",
         decision=decision,
+    )
+
+
+def _make_capability(
+    execution_attempt: ExecutionAttempt,
+) -> ExecutionCapability:
+    action = execution_attempt.consequence.action
+
+    return ExecutionCapability(
+        capability_id="capability-001",
+        consequence_id=(
+            execution_attempt.consequence.consequence_id
+        ),
+        action_type=action.action_type,
+        resource_id=action.resource.resource_id,
     )
 
 
@@ -129,7 +145,9 @@ def test_adapter_execution_result_requires_execution_attempt() -> None:
     ):
         AdapterExecutionResult(
             result_id="adapter-result-001",
-            execution_attempt="execution-attempt-001",  # type: ignore[arg-type]
+            execution_attempt=(
+                "execution-attempt-001"  # type: ignore[arg-type]
+            ),
             state=AdapterExecutionState.ACKNOWLEDGED,
         )
 
@@ -177,14 +195,19 @@ def test_adapter_execution_states_are_request_level_only(
     )
 
     assert result.state is state
+
     assert not hasattr(result, "effect")
     assert not hasattr(result, "effect_state")
+
 
 def test_effect_adapter_protocol_accepts_structural_implementation() -> None:
     class TestAdapter:
         def execute(
             self,
+            *,
             execution_attempt: ExecutionAttempt,
+            effect: RequestedEffect,
+            capability: ExecutionCapability,
         ) -> AdapterExecutionResult:
             return AdapterExecutionResult(
                 result_id="adapter-result-001",
@@ -197,11 +220,146 @@ def test_effect_adapter_protocol_accepts_structural_implementation() -> None:
     assert isinstance(adapter, EffectAdapter)
 
 
+def test_effect_adapter_receives_exact_execution_inputs() -> None:
+    received: dict[str, object] = {}
+
+    class TestAdapter:
+        def execute(
+            self,
+            *,
+            execution_attempt: ExecutionAttempt,
+            effect: RequestedEffect,
+            capability: ExecutionCapability,
+        ) -> AdapterExecutionResult:
+            received["execution_attempt"] = execution_attempt
+            received["effect"] = effect
+            received["capability"] = capability
+
+            return AdapterExecutionResult(
+                result_id="adapter-result-001",
+                execution_attempt=execution_attempt,
+                state=AdapterExecutionState.ACKNOWLEDGED,
+                references=[
+                    "request-id:123",
+                ],
+            )
+
+    execution_attempt = _make_execution_attempt()
+
+    effect = (
+        execution_attempt
+        .consequence
+        .action
+        .requested_effect
+    )
+
+    capability = _make_capability(
+        execution_attempt,
+    )
+
+    adapter = TestAdapter()
+
+    result = adapter.execute(
+        execution_attempt=execution_attempt,
+        effect=effect,
+        capability=capability,
+    )
+
+    assert received["execution_attempt"] is execution_attempt
+    assert received["effect"] is effect
+    assert received["capability"] is capability
+
+    assert isinstance(
+        result,
+        AdapterExecutionResult,
+    )
+
+    assert result.execution_attempt is execution_attempt
+    assert result.state is AdapterExecutionState.ACKNOWLEDGED
+
+    assert result.references == (
+        "request-id:123",
+    )
+
+    assert not hasattr(result, "effect")
+    assert not hasattr(result, "effect_state")
+
+
+def test_effect_adapter_can_receive_narrowed_effect_only() -> None:
+    base_execution_attempt = _make_execution_attempt()
+
+    permitted_effect = RequestedEffect(
+        parameters={
+            "database": "customers",
+            "environment": "staging",
+        }
+    )
+
+    narrowed_decision = Decision(
+        decision_id="decision-narrowed-001",
+        state=DecisionState.NARROWED,
+        attempt=base_execution_attempt.decision.attempt,
+        permitted_effect=permitted_effect,
+    )
+
+    execution_attempt = ExecutionAttempt(
+        execution_attempt_id="execution-attempt-narrowed-001",
+        decision=narrowed_decision,
+    )
+
+    capability = _make_capability(
+        execution_attempt,
+    )
+
+    received_effects: list[RequestedEffect] = []
+
+    class TestAdapter:
+        def execute(
+            self,
+            *,
+            execution_attempt: ExecutionAttempt,
+            effect: RequestedEffect,
+            capability: ExecutionCapability,
+        ) -> AdapterExecutionResult:
+            received_effects.append(effect)
+
+            return AdapterExecutionResult(
+                result_id="adapter-result-narrowed-001",
+                execution_attempt=execution_attempt,
+                state=AdapterExecutionState.ACKNOWLEDGED,
+            )
+
+    adapter = TestAdapter()
+
+    result = adapter.execute(
+        execution_attempt=execution_attempt,
+        effect=permitted_effect,
+        capability=capability,
+    )
+
+    assert received_effects == [
+        permitted_effect,
+    ]
+
+    assert (
+        received_effects[0]
+        is not execution_attempt
+        .consequence
+        .action
+        .requested_effect
+    )
+
+    assert result.execution_attempt is execution_attempt
+
+
 def test_effect_adapter_execute_returns_adapter_result_only() -> None:
     class TestAdapter:
         def execute(
             self,
+            *,
             execution_attempt: ExecutionAttempt,
+            effect: RequestedEffect,
+            capability: ExecutionCapability,
         ) -> AdapterExecutionResult:
             return AdapterExecutionResult(
                 result_id="adapter-result-001",
@@ -213,14 +371,37 @@ def test_effect_adapter_execute_returns_adapter_result_only() -> None:
             )
 
     adapter = TestAdapter()
+
     execution_attempt = _make_execution_attempt()
 
-    result = adapter.execute(execution_attempt)
+    effect = (
+        execution_attempt
+        .consequence
+        .action
+        .requested_effect
+    )
 
-    assert isinstance(result, AdapterExecutionResult)
+    capability = _make_capability(
+        execution_attempt,
+    )
+
+    result = adapter.execute(
+        execution_attempt=execution_attempt,
+        effect=effect,
+        capability=capability,
+    )
+
+    assert isinstance(
+        result,
+        AdapterExecutionResult,
+    )
+
     assert result.execution_attempt is execution_attempt
     assert result.state is AdapterExecutionState.ACKNOWLEDGED
-    assert result.references == ("request-id:123",)
+
+    assert result.references == (
+        "request-id:123",
+    )
 
     assert not hasattr(result, "effect")
     assert not hasattr(result, "effect_state")
@@ -230,4 +411,7 @@ def test_non_adapter_does_not_satisfy_effect_adapter_protocol() -> None:
     class NotAnAdapter:
         pass
 
-    assert not isinstance(NotAnAdapter(), EffectAdapter)    
+    assert not isinstance(
+        NotAnAdapter(),
+        EffectAdapter,
+    )

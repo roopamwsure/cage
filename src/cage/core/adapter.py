@@ -3,6 +3,8 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Protocol, runtime_checkable
 
+from cage.core.action import RequestedEffect
+from cage.core.capability import ExecutionCapability
 from cage.core.execution import ExecutionAttempt
 
 
@@ -19,15 +21,22 @@ def _freeze_references(
     field_name: str,
 ) -> tuple[str, ...]:
     if isinstance(references, str):
-        raise TypeError(f"{field_name} must be a sequence of strings")
+        raise TypeError(
+            f"{field_name} must be a sequence of strings"
+        )
 
     if not isinstance(references, Sequence):
-        raise TypeError(f"{field_name} must be a sequence of strings")
+        raise TypeError(
+            f"{field_name} must be a sequence of strings"
+        )
 
     frozen = tuple(references)
 
     for reference in frozen:
-        _require_non_empty(reference, field_name)
+        _require_non_empty(
+            reference,
+            field_name,
+        )
 
     return frozen
 
@@ -47,7 +56,10 @@ class AdapterExecutionResult:
     references: Sequence[str] = ()
 
     def __post_init__(self) -> None:
-        _require_non_empty(self.result_id, "result_id")
+        _require_non_empty(
+            self.result_id,
+            "result_id",
+        )
 
         if not isinstance(
             self.execution_attempt,
@@ -57,7 +69,10 @@ class AdapterExecutionResult:
                 "execution_attempt must be an ExecutionAttempt"
             )
 
-        if not isinstance(self.state, AdapterExecutionState):
+        if not isinstance(
+            self.state,
+            AdapterExecutionState,
+        ):
             raise TypeError(
                 "state must be an AdapterExecutionState"
             )
@@ -78,6 +93,9 @@ class AdapterExecutionResult:
 class EffectAdapter(Protocol):
     def execute(
         self,
+        *,
         execution_attempt: ExecutionAttempt,
+        effect: RequestedEffect,
+        capability: ExecutionCapability,
     ) -> AdapterExecutionResult:
         ...
