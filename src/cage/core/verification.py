@@ -8,7 +8,6 @@ from cage.core.consequence import Consequence
 from cage.core.effect import Effect, EffectState
 from cage.core.execution import ExecutionAttempt
 
-
 def _require_non_empty(
     value: str,
     field_name: str,
@@ -53,6 +52,10 @@ class VerificationState(StrEnum):
     VERIFIED_BOUND = "verified_bound"
     VERIFIED_NO_BIND = "verified_no_bind"
     INCONCLUSIVE = "inconclusive"
+
+
+class VerificationResultMismatchError(ValueError):
+    """Raised when verification refers to another adapter result."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -124,6 +127,48 @@ class EffectVerifier(Protocol):
         adapter_result: AdapterExecutionResult,
     ) -> EffectVerificationResult:
         ...
+
+
+def reconcile_effect_verification(
+    *,
+    adapter_result: AdapterExecutionResult,
+    verifier: EffectVerifier,
+) -> EffectVerificationResult:
+    if not isinstance(
+        adapter_result,
+        AdapterExecutionResult,
+    ):
+        raise TypeError(
+            "adapter_result must be an AdapterExecutionResult"
+        )
+
+    if not isinstance(
+        verifier,
+        EffectVerifier,
+    ):
+        raise TypeError(
+            "verifier must satisfy EffectVerifier"
+        )
+
+    verification = verifier.verify(
+        adapter_result=adapter_result,
+    )
+
+    if not isinstance(
+        verification,
+        EffectVerificationResult,
+    ):
+        raise TypeError(
+            "verifier must return an EffectVerificationResult"
+        )
+
+    if verification.adapter_result != adapter_result:
+        raise VerificationResultMismatchError(
+            "verification adapter_result does not match "
+            "reconciled adapter_result"
+        )
+
+    return verification
 
 
 def create_effect_from_verification(

@@ -14,8 +14,10 @@ from cage.core.identity import Agent, Principal, Resource
 from cage.core.verification import (
     EffectVerificationResult,
     EffectVerifier,
+    VerificationResultMismatchError,
     VerificationState,
     create_effect_from_verification,
+    reconcile_effect_verification,
 )
 
 
@@ -590,4 +592,198 @@ def test_non_verifier_does_not_satisfy_effect_verifier_protocol() -> None:
     assert not isinstance(
         NotAVerifier(),
         EffectVerifier,
-    )        
+    )   
+
+def test_reconciliation_uses_existing_adapter_result_only() -> None:
+    adapter_result = _make_adapter_result(
+        state=AdapterExecutionState.ACKNOWLEDGED,
+    )
+
+    received: list[AdapterExecutionResult] = []
+
+    class TestVerifier:
+        def verify(
+            self,
+            *,
+            adapter_result: AdapterExecutionResult,
+        ) -> EffectVerificationResult:
+            received.append(adapter_result)
+
+            return EffectVerificationResult(
+                verification_id="verification-reconcile-001",
+                adapter_result=adapter_result,
+                state=VerificationState.INCONCLUSIVE,
+            )
+
+    verification = reconcile_effect_verification(
+        adapter_result=adapter_result,
+        verifier=TestVerifier(),
+    )
+
+    assert received == [adapter_result]
+    assert verification.adapter_result is adapter_result
+    assert verification.state is VerificationState.INCONCLUSIVE
+
+
+def test_reconciliation_can_resolve_inconclusive_to_verified_bound() -> None:
+    adapter_result = _make_adapter_result(
+        state=AdapterExecutionState.ACKNOWLEDGED,
+    )
+
+    class TestVerifier:
+        def verify(
+            self,
+            *,
+            adapter_result: AdapterExecutionResult,
+        ) -> EffectVerificationResult:
+            return EffectVerificationResult(
+                verification_id="verification-reconcile-bound-001",
+                adapter_result=adapter_result,
+                state=VerificationState.VERIFIED_BOUND,
+                references=[
+                    "authoritative-record:bound-999",
+                ],
+            )
+
+    verification = reconcile_effect_verification(
+        adapter_result=adapter_result,
+        verifier=TestVerifier(),
+    )
+
+    assert verification.state is VerificationState.VERIFIED_BOUND
+
+    assert verification.references == (
+        "authoritative-record:bound-999",
+    )
+
+
+def test_reconciliation_can_remain_inconclusive() -> None:
+    adapter_result = _make_adapter_result(
+        state=AdapterExecutionState.UNKNOWN,
+    )
+
+    class TestVerifier:
+        def verify(
+            self,
+            *,
+            adapter_result: AdapterExecutionResult,
+        ) -> EffectVerificationResult:
+            return EffectVerificationResult(
+                verification_id="verification-reconcile-001",
+                adapter_result=adapter_result,
+                state=VerificationState.INCONCLUSIVE,
+            )
+
+    verification = reconcile_effect_verification(
+        adapter_result=adapter_result,
+        verifier=TestVerifier(),
+    )
+
+    assert verification.state is VerificationState.INCONCLUSIVE
+    assert verification.references == ()
+
+
+def test_reconciliation_does_not_require_effect_adapter() -> None:
+    adapter_result = _make_adapter_result()
+
+    class TestVerifier:
+        def verify(
+            self,
+            *,
+            adapter_result: AdapterExecutionResult,
+        ) -> EffectVerificationResult:
+            return EffectVerificationResult(
+                verification_id="verification-reconcile-001",
+                adapter_result=adapter_result,
+                state=VerificationState.INCONCLUSIVE,
+            )
+
+    verification = reconcile_effect_verification(
+        adapter_result=adapter_result,
+        verifier=TestVerifier(),
+    )
+
+    assert verification.adapter_result is adapter_result
+
+
+def test_reconciliation_requires_adapter_result() -> None:
+    class TestVerifier:
+        def verify(
+            self,
+            *,
+            adapter_result: AdapterExecutionResult,
+        ) -> EffectVerificationResult:
+            raise AssertionError("verifier should not be called")
+
+    with pytest.raises(
+        TypeError,
+        match="adapter_result must be an AdapterExecutionResult",
+    ):
+        reconcile_effect_verification(
+            adapter_result="adapter-result-001",  # type: ignore[arg-type]
+            verifier=TestVerifier(),
+        )
+
+
+def test_reconciliation_requires_effect_verifier() -> None:
+    with pytest.raises(
+        TypeError,
+        match="verifier must satisfy EffectVerifier",
+    ):
+        reconcile_effect_verification(
+            adapter_result=_make_adapter_result(),
+            verifier=object(),  # type: ignore[arg-type]
+        )
+
+
+def test_reconciliation_requires_verification_result() -> None:
+    class BadVerifier:
+        def verify(
+            self,
+            *,
+            adapter_result: AdapterExecutionResult,
+        ) -> object:
+            return object()
+
+    with pytest.raises(
+        TypeError,
+        match="verifier must return an EffectVerificationResult",
+    ):
+        reconcile_effect_verification(
+            adapter_result=_make_adapter_result(),
+            verifier=BadVerifier(),  # type: ignore[arg-type]
+        )
+
+
+def test_reconciliation_rejects_verification_for_other_adapter_result() -> None:
+    adapter_result = _make_adapter_result()
+
+    other_adapter_result = AdapterExecutionResult(
+        result_id="adapter-result-999",
+        execution_attempt=adapter_result.execution_attempt,
+        state=AdapterExecutionState.ACKNOWLEDGED,
+    )
+
+    class TestVerifier:
+        def verify(
+            self,
+            *,
+            adapter_result: AdapterExecutionResult,
+        ) -> EffectVerificationResult:
+            return EffectVerificationResult(
+                verification_id="verification-wrong-result-001",
+                adapter_result=other_adapter_result,
+                state=VerificationState.INCONCLUSIVE,
+            )
+
+    with pytest.raises(
+        VerificationResultMismatchError,
+        match=(
+            "verification adapter_result does not match "
+            "reconciled adapter_result"
+        ),
+    ):
+        reconcile_effect_verification(
+            adapter_result=adapter_result,
+            verifier=TestVerifier(),
+        )         
