@@ -4,6 +4,7 @@ from cage.core.action import Action, RequestedEffect
 from cage.core.adapter import (
     AdapterExecutionResult,
     AdapterExecutionState,
+    EffectAdapter,
 )
 from cage.core.attempt import Attempt
 from cage.core.consequence import Consequence
@@ -178,3 +179,55 @@ def test_adapter_execution_states_are_request_level_only(
     assert result.state is state
     assert not hasattr(result, "effect")
     assert not hasattr(result, "effect_state")
+
+def test_effect_adapter_protocol_accepts_structural_implementation() -> None:
+    class TestAdapter:
+        def execute(
+            self,
+            execution_attempt: ExecutionAttempt,
+        ) -> AdapterExecutionResult:
+            return AdapterExecutionResult(
+                result_id="adapter-result-001",
+                execution_attempt=execution_attempt,
+                state=AdapterExecutionState.ACKNOWLEDGED,
+            )
+
+    adapter = TestAdapter()
+
+    assert isinstance(adapter, EffectAdapter)
+
+
+def test_effect_adapter_execute_returns_adapter_result_only() -> None:
+    class TestAdapter:
+        def execute(
+            self,
+            execution_attempt: ExecutionAttempt,
+        ) -> AdapterExecutionResult:
+            return AdapterExecutionResult(
+                result_id="adapter-result-001",
+                execution_attempt=execution_attempt,
+                state=AdapterExecutionState.ACKNOWLEDGED,
+                references=[
+                    "request-id:123",
+                ],
+            )
+
+    adapter = TestAdapter()
+    execution_attempt = _make_execution_attempt()
+
+    result = adapter.execute(execution_attempt)
+
+    assert isinstance(result, AdapterExecutionResult)
+    assert result.execution_attempt is execution_attempt
+    assert result.state is AdapterExecutionState.ACKNOWLEDGED
+    assert result.references == ("request-id:123",)
+
+    assert not hasattr(result, "effect")
+    assert not hasattr(result, "effect_state")
+
+
+def test_non_adapter_does_not_satisfy_effect_adapter_protocol() -> None:
+    class NotAnAdapter:
+        pass
+
+    assert not isinstance(NotAnAdapter(), EffectAdapter)    

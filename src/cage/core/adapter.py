@@ -1,6 +1,7 @@
 from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import StrEnum
+from typing import Protocol, runtime_checkable
 
 from cage.core.execution import ExecutionAttempt
 
@@ -71,3 +72,12 @@ class AdapterExecutionResult:
             "references",
             frozen_references,
         )
+
+
+@runtime_checkable
+class EffectAdapter(Protocol):
+    def execute(
+        self,
+        execution_attempt: ExecutionAttempt,
+    ) -> AdapterExecutionResult:
+        ...
