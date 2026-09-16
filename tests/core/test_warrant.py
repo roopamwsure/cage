@@ -19,11 +19,6 @@ from cage.core.adapter import (
     AdapterExecutionState,
 )
 from cage.core.execution import ExecutionAttempt
-from cage.core.verification import (
-    EffectVerificationResult,
-    VerificationState,
-)
-
 from cage.core.identity import Agent, Principal, Resource
 from cage.core.warrant import (
     DecisionProof,
@@ -32,7 +27,13 @@ from cage.core.warrant import (
     create_decision_proof,
     create_effect_proof,
 )
-
+from cage.core.capability import ExecutionCapability
+from cage.core.custody import execute_under_custody
+from cage.core.verification import (
+    EffectVerificationResult,
+    VerificationState,
+    create_effect_from_verification,
+)
 
 def _make_consequence() -> Consequence:
     action = Action(
@@ -1275,4 +1276,131 @@ def test_replay_preserves_consequence_and_creates_new_decision_lineage() -> None
     )
 
     assert second_warrant.effect_proof is None
-     
+
+def test_end_to_end_v06_custody_warrant_lineage() -> None:
+    consequence = _make_consequence()
+
+    attempt = Attempt(
+        attempt_id="attempt-v06-001",
+        consequence=consequence,
+    )
+
+    decision = Decision(
+        decision_id="decision-v06-001",
+        state=DecisionState.ADMITTED,
+        attempt=attempt,
+    )
+
+    decision_proof = create_decision_proof(
+        proof_id="decision-proof-v06-001",
+        decision=decision,
+    )
+
+    execution_attempt = ExecutionAttempt(
+        execution_attempt_id="execution-attempt-v06-001",
+        decision=decision,
+    )
+
+    capability = ExecutionCapability(
+        capability_id="capability-v06-001",
+        consequence_id=consequence.consequence_id,
+        action_type=consequence.action.action_type,
+        resource_id=consequence.action.resource.resource_id,
+    )
+
+    received: dict[str, object] = {}
+
+    class TestAdapter:
+        def execute(
+            self,
+            *,
+            execution_attempt: ExecutionAttempt,
+            effect: RequestedEffect,
+            capability: ExecutionCapability,
+        ) -> AdapterExecutionResult:
+            received["execution_attempt"] = execution_attempt
+            received["effect"] = effect
+            received["capability"] = capability
+
+            return AdapterExecutionResult(
+                result_id="adapter-result-v06-001",
+                execution_attempt=execution_attempt,
+                state=AdapterExecutionState.ACKNOWLEDGED,
+                references=[
+                    "request-id:v06-123",
+                ],
+            )
+
+    adapter_result = execute_under_custody(
+        execution_attempt=execution_attempt,
+        capability=capability,
+        adapter=TestAdapter(),
+    )
+
+    assert received["execution_attempt"] is execution_attempt
+    assert (
+        received["effect"]
+        is consequence.action.requested_effect
+    )
+    assert received["capability"] is capability
+
+    verification = EffectVerificationResult(
+        verification_id="verification-v06-001",
+        adapter_result=adapter_result,
+        state=VerificationState.VERIFIED_BOUND,
+        references=[
+            "authoritative-record:v06-456",
+        ],
+    )
+
+    effect = create_effect_from_verification(
+        effect_id="effect-v06-001",
+        verification=verification,
+    )
+
+    effect_proof = create_effect_proof(
+        proof_id="effect-proof-v06-001",
+        effect=effect,
+        verification=verification,
+    )
+
+    warrant = Warrant(
+        warrant_id="warrant-v06-001",
+        schema_version="0.6-draft",
+        decision_proof=decision_proof,
+        effect_proof=effect_proof,
+    )
+
+    assert warrant.consequence_id == consequence.consequence_id
+    assert warrant.action_id == consequence.action.action_id
+    assert warrant.attempt_id == attempt.attempt_id
+
+    assert (
+        warrant.execution_attempt_id
+        == "execution-attempt-v06-001"
+    )
+
+    assert (
+        warrant.adapter_result_id
+        == "adapter-result-v06-001"
+    )
+
+    assert (
+        warrant.verification_id
+        == "verification-v06-001"
+    )
+
+    assert warrant.effect_proof is effect_proof
+    assert effect_proof.effect is effect
+    assert effect_proof.verification is verification
+
+    assert effect.state is EffectState.BOUND
+
+    assert effect.verification_refs == (
+        "authoritative-record:v06-456",
+    )
+
+    assert (
+        effect.consequence
+        is decision.attempt.consequence
+    )     
