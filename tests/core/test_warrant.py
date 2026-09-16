@@ -33,6 +33,7 @@ from cage.core.verification import (
     EffectVerificationResult,
     VerificationState,
     create_effect_from_verification,
+    reconcile_effect_verification,
 )
 
 def _make_consequence() -> Consequence:
@@ -1158,7 +1159,7 @@ def test_end_to_end_pre_effect_assurance_path() -> None:
     assert warrant.action_id == "action-001"
     assert warrant.attempt_id == "attempt-e2e-001"
 
-    assert warrant.effect_proof is None   
+    assert warrant.effect_proof is None
 
 def test_replay_preserves_consequence_and_creates_new_decision_lineage() -> None:
     consequence = _make_consequence()
@@ -1284,7 +1285,6 @@ def test_end_to_end_v06_custody_warrant_lineage() -> None:
         attempt_id="attempt-v06-001",
         consequence=consequence,
     )
-
     decision = Decision(
         decision_id="decision-v06-001",
         state=DecisionState.ADMITTED,
@@ -1403,4 +1403,250 @@ def test_end_to_end_v06_custody_warrant_lineage() -> None:
     assert (
         effect.consequence
         is decision.attempt.consequence
-    )     
+    )
+
+
+def test_end_to_end_v06_reconciliation_warrant_lineage() -> None:
+    consequence = _make_consequence()
+
+    attempt = Attempt(
+        attempt_id="attempt-v06-reconcile-001",
+        consequence=consequence,
+    )
+
+    decision = Decision(
+        decision_id="decision-v06-reconcile-001",
+        state=DecisionState.ADMITTED,
+        attempt=attempt,
+    )
+
+    decision_proof = create_decision_proof(
+        proof_id="decision-proof-v06-reconcile-001",
+        decision=decision,
+    )
+
+    execution_attempt = ExecutionAttempt(
+        execution_attempt_id="execution-attempt-v06-reconcile-001",
+        decision=decision,
+    )
+
+    capability = ExecutionCapability(
+        capability_id="capability-v06-reconcile-001",
+        consequence_id=consequence.consequence_id,
+        action_type=consequence.action.action_type,
+        resource_id=consequence.action.resource.resource_id,
+    )
+
+    class CountingAdapter:
+        def __init__(self) -> None:
+            self.call_count = 0
+
+        def execute(
+            self,
+            *,
+            execution_attempt: ExecutionAttempt,
+            effect: RequestedEffect,
+            capability: ExecutionCapability,
+        ) -> AdapterExecutionResult:
+            self.call_count += 1
+
+            return AdapterExecutionResult(
+                result_id="adapter-result-v06-reconcile-001",
+                execution_attempt=execution_attempt,
+                state=AdapterExecutionState.ACKNOWLEDGED,
+                references=[
+                    "request-id:v06-reconcile-123",
+                ],
+            )
+
+    adapter = CountingAdapter()
+
+    adapter_result = execute_under_custody(
+        execution_attempt=execution_attempt,
+        capability=capability,
+        adapter=adapter,
+    )
+
+    assert adapter.call_count == 1
+
+    first_verification = EffectVerificationResult(
+        verification_id="verification-v06-reconcile-001",
+        adapter_result=adapter_result,
+        state=VerificationState.INCONCLUSIVE,
+    )
+
+    first_effect = create_effect_from_verification(
+        effect_id="effect-v06-reconcile-001",
+        verification=first_verification,
+    )
+
+    first_effect_proof = create_effect_proof(
+        proof_id="effect-proof-v06-reconcile-001",
+        effect=first_effect,
+        verification=first_verification,
+    )
+
+    first_warrant = Warrant(
+        warrant_id="warrant-v06-reconcile-001",
+        schema_version="0.6-draft",
+        decision_proof=decision_proof,
+        effect_proof=first_effect_proof,
+    )
+
+    assert first_effect.state is EffectState.EFFECT_UNKNOWN
+    assert first_effect.verification_refs == ()
+
+    assert first_warrant.consequence_id == consequence.consequence_id
+    assert first_warrant.attempt_id == attempt.attempt_id
+
+    assert (
+        first_warrant.execution_attempt_id
+        == execution_attempt.execution_attempt_id
+    )
+
+    assert (
+        first_warrant.adapter_result_id
+        == adapter_result.result_id
+    )
+
+    assert (
+        first_warrant.verification_id
+        == first_verification.verification_id
+    )
+
+    assert first_warrant.previous_warrant_id is None
+
+    class ReconciliationVerifier:
+        def __init__(self) -> None:
+            self.call_count = 0
+
+        def verify(
+            self,
+            *,
+            adapter_result: AdapterExecutionResult,
+        ) -> EffectVerificationResult:
+            self.call_count += 1
+
+            return EffectVerificationResult(
+                verification_id="verification-v06-reconcile-002",
+                adapter_result=adapter_result,
+                state=VerificationState.VERIFIED_BOUND,
+                references=[
+                    "authoritative-record:v06-reconcile-456",
+                ],
+            )
+
+    verifier = ReconciliationVerifier()
+
+    second_verification = reconcile_effect_verification(
+        adapter_result=adapter_result,
+        verifier=verifier,
+    )
+
+    assert verifier.call_count == 1
+
+    second_effect = create_effect_from_verification(
+        effect_id="effect-v06-reconcile-002",
+        verification=second_verification,
+    )
+
+    second_effect_proof = create_effect_proof(
+        proof_id="effect-proof-v06-reconcile-002",
+        effect=second_effect,
+        verification=second_verification,
+    )
+
+    second_warrant = Warrant(
+        warrant_id="warrant-v06-reconcile-002",
+        schema_version="0.6-draft",
+        decision_proof=decision_proof,
+        effect_proof=second_effect_proof,
+        previous_warrant_id=first_warrant.warrant_id,
+    )
+
+    assert adapter.call_count == 1
+
+    assert (
+        first_verification.adapter_result
+        is adapter_result
+    )
+
+    assert (
+        second_verification.adapter_result
+        is adapter_result
+    )
+
+    assert (
+        first_verification.execution_attempt
+        is execution_attempt
+    )
+
+    assert (
+        second_verification.execution_attempt
+        is execution_attempt
+    )
+
+    assert (
+        first_effect.consequence
+        is consequence
+    )
+
+    assert (
+        second_effect.consequence
+        is consequence
+    )
+
+    assert first_effect.state is EffectState.EFFECT_UNKNOWN
+    assert second_effect.state is EffectState.BOUND
+
+    assert (
+        second_effect.verification_refs
+        == (
+            "authoritative-record:v06-reconcile-456",
+        )
+    )
+
+    assert (
+        first_warrant.consequence_id
+        == second_warrant.consequence_id
+        == consequence.consequence_id
+    )
+
+    assert (
+        first_warrant.attempt_id
+        == second_warrant.attempt_id
+        == attempt.attempt_id
+    )
+
+    assert (
+        first_warrant.execution_attempt_id
+        == second_warrant.execution_attempt_id
+        == execution_attempt.execution_attempt_id
+    )
+
+    assert (
+        first_warrant.adapter_result_id
+        == second_warrant.adapter_result_id
+        == adapter_result.result_id
+    )
+
+    assert (
+        first_warrant.verification_id
+        != second_warrant.verification_id
+    )
+
+    assert (
+        second_warrant.previous_warrant_id
+        == first_warrant.warrant_id
+    )
+
+    assert (
+        second_warrant.decision_proof
+        is first_warrant.decision_proof
+    )
+
+    assert first_effect is not second_effect
+    assert first_effect_proof is not second_effect_proof
+    assert first_warrant is not second_warrant
+
+    assert adapter.call_count == 1
