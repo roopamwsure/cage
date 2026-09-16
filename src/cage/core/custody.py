@@ -1,6 +1,11 @@
 from cage.core.action import RequestedEffect
+from cage.core.adapter import (
+    AdapterExecutionResult,
+    EffectAdapter,
+)
 from cage.core.capability import ExecutionCapability
 from cage.core.decision import Decision, DecisionState
+from cage.core.execution import ExecutionAttempt
 
 
 class CustodyIneligibleError(ValueError):
@@ -9,6 +14,10 @@ class CustodyIneligibleError(ValueError):
 
 class CapabilityMismatchError(ValueError):
     """Raised when an execution capability does not match custody intent."""
+
+
+class AdapterResultMismatchError(ValueError):
+    """Raised when an adapter result refers to a different execution attempt."""
 
 
 def select_effect_for_custody(
@@ -72,3 +81,55 @@ def validate_capability_for_custody(
             "capability resource_id does not match "
             "decision resource"
         )
+
+
+def execute_under_custody(
+    *,
+    execution_attempt: ExecutionAttempt,
+    capability: ExecutionCapability,
+    adapter: EffectAdapter,
+) -> AdapterExecutionResult:
+    if not isinstance(execution_attempt, ExecutionAttempt):
+        raise TypeError(
+            "execution_attempt must be an ExecutionAttempt"
+        )
+
+    if not isinstance(capability, ExecutionCapability):
+        raise TypeError(
+            "capability must be an ExecutionCapability"
+        )
+
+    if not isinstance(adapter, EffectAdapter):
+        raise TypeError(
+            "adapter must satisfy EffectAdapter"
+        )
+
+    decision = execution_attempt.decision
+
+    selected_effect = select_effect_for_custody(
+        decision
+    )
+
+    validate_capability_for_custody(
+        decision=decision,
+        capability=capability,
+    )
+
+    result = adapter.execute(
+        execution_attempt=execution_attempt,
+        effect=selected_effect,
+        capability=capability,
+    )
+
+    if not isinstance(result, AdapterExecutionResult):
+        raise TypeError(
+            "adapter must return an AdapterExecutionResult"
+        )
+
+    if result.execution_attempt != execution_attempt:
+        raise AdapterResultMismatchError(
+            "adapter result execution_attempt does not match "
+            "custody execution_attempt"
+        )
+
+    return result
