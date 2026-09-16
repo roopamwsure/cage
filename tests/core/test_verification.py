@@ -13,7 +13,9 @@ from cage.core.execution import ExecutionAttempt
 from cage.core.identity import Agent, Principal, Resource
 from cage.core.verification import (
     EffectVerificationResult,
+    EffectVerifier,
     VerificationState,
+    create_effect_from_verification,
 )
 
 
@@ -467,3 +469,125 @@ def test_create_effect_requires_verification_result() -> None:
             effect_id="effect-001",
             verification="verification-001",  # type: ignore[arg-type]
         )    
+
+def test_effect_verifier_protocol_accepts_structural_implementation() -> None:
+    class TestVerifier:
+        def verify(
+            self,
+            *,
+            adapter_result: AdapterExecutionResult,
+        ) -> EffectVerificationResult:
+            return EffectVerificationResult(
+                verification_id="verification-001",
+                adapter_result=adapter_result,
+                state=VerificationState.INCONCLUSIVE,
+            )
+
+    verifier = TestVerifier()
+
+    assert isinstance(verifier, EffectVerifier)
+
+
+def test_effect_verifier_receives_exact_adapter_result() -> None:
+    adapter_result = _make_adapter_result()
+
+    received: dict[str, object] = {}
+
+    class TestVerifier:
+        def verify(
+            self,
+            *,
+            adapter_result: AdapterExecutionResult,
+        ) -> EffectVerificationResult:
+            received["adapter_result"] = adapter_result
+
+            return EffectVerificationResult(
+                verification_id="verification-001",
+                adapter_result=adapter_result,
+                state=VerificationState.INCONCLUSIVE,
+            )
+
+    verifier = TestVerifier()
+
+    result = verifier.verify(
+        adapter_result=adapter_result,
+    )
+
+    assert received["adapter_result"] is adapter_result
+    assert result.adapter_result is adapter_result
+    assert result.state is VerificationState.INCONCLUSIVE
+
+
+def test_effect_verifier_can_establish_bound_independent_of_adapter_state() -> None:
+    adapter_result = _make_adapter_result(
+        state=AdapterExecutionState.ERROR,
+    )
+
+    class TestVerifier:
+        def verify(
+            self,
+            *,
+            adapter_result: AdapterExecutionResult,
+        ) -> EffectVerificationResult:
+            return EffectVerificationResult(
+                verification_id="verification-bound-001",
+                adapter_result=adapter_result,
+                state=VerificationState.VERIFIED_BOUND,
+                references=[
+                    "authoritative-record:bound-123",
+                ],
+            )
+
+    verification = TestVerifier().verify(
+        adapter_result=adapter_result,
+    )
+
+    assert (
+        verification.adapter_result.state
+        is AdapterExecutionState.ERROR
+    )
+    assert (
+        verification.state
+        is VerificationState.VERIFIED_BOUND
+    )
+
+
+def test_effect_verifier_can_remain_inconclusive_after_acknowledgement() -> None:
+    adapter_result = _make_adapter_result(
+        state=AdapterExecutionState.ACKNOWLEDGED,
+    )
+
+    class TestVerifier:
+        def verify(
+            self,
+            *,
+            adapter_result: AdapterExecutionResult,
+        ) -> EffectVerificationResult:
+            return EffectVerificationResult(
+                verification_id="verification-inconclusive-001",
+                adapter_result=adapter_result,
+                state=VerificationState.INCONCLUSIVE,
+            )
+
+    verification = TestVerifier().verify(
+        adapter_result=adapter_result,
+    )
+
+    assert (
+        verification.adapter_result.state
+        is AdapterExecutionState.ACKNOWLEDGED
+    )
+    assert (
+        verification.state
+        is VerificationState.INCONCLUSIVE
+    )
+
+
+def test_non_verifier_does_not_satisfy_effect_verifier_protocol() -> None:
+    class NotAVerifier:
+        pass
+
+    assert not isinstance(
+        NotAVerifier(),
+        EffectVerifier,
+    )        

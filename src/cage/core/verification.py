@@ -1,6 +1,7 @@
 from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import StrEnum
+from typing import Protocol, runtime_checkable
 
 from cage.core.adapter import AdapterExecutionResult
 from cage.core.consequence import Consequence
@@ -113,6 +114,16 @@ class EffectVerificationResult:
     @property
     def consequence(self) -> Consequence:
         return self.execution_attempt.consequence
+
+
+@runtime_checkable
+class EffectVerifier(Protocol):
+    def verify(
+        self,
+        *,
+        adapter_result: AdapterExecutionResult,
+    ) -> EffectVerificationResult:
+        ...
 
 
 def create_effect_from_verification(
