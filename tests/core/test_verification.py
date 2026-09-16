@@ -1,5 +1,6 @@
 import pytest
 
+from cage.core.effect import EffectState
 from cage.core.action import Action, RequestedEffect
 from cage.core.adapter import (
     AdapterExecutionResult,
@@ -286,3 +287,183 @@ def test_adapter_state_does_not_determine_verification_state(
 
     assert verification.adapter_result.state is adapter_state
     assert verification.state is VerificationState.INCONCLUSIVE
+
+def test_verified_bound_creates_bound_effect() -> None:
+    verification = EffectVerificationResult(
+        verification_id="verification-bound-001",
+        adapter_result=_make_adapter_result(
+            state=AdapterExecutionState.ACKNOWLEDGED,
+        ),
+        state=VerificationState.VERIFIED_BOUND,
+        references=[
+            "authoritative-record:bound-123",
+        ],
+    )
+
+    from cage.core.verification import create_effect_from_verification
+
+    effect = create_effect_from_verification(
+        effect_id="effect-001",
+        verification=verification,
+    )
+
+    assert effect.effect_id == "effect-001"
+    assert effect.state is EffectState.BOUND
+    assert effect.consequence is verification.consequence
+
+    assert effect.verification_refs == (
+        "authoritative-record:bound-123",
+    )
+
+
+def test_verified_no_bind_creates_no_bind_effect() -> None:
+    verification = EffectVerificationResult(
+        verification_id="verification-no-bind-001",
+        adapter_result=_make_adapter_result(
+            state=AdapterExecutionState.ERROR,
+        ),
+        state=VerificationState.VERIFIED_NO_BIND,
+        references=[
+            "authoritative-record:no-bind-123",
+        ],
+    )
+
+    from cage.core.verification import create_effect_from_verification
+
+    effect = create_effect_from_verification(
+        effect_id="effect-002",
+        verification=verification,
+    )
+
+    assert effect.state is EffectState.NO_BIND
+    assert effect.consequence is verification.consequence
+
+    assert effect.verification_refs == (
+        "authoritative-record:no-bind-123",
+    )
+
+
+def test_inconclusive_creates_effect_unknown() -> None:
+    verification = EffectVerificationResult(
+        verification_id="verification-inconclusive-001",
+        adapter_result=_make_adapter_result(
+            state=AdapterExecutionState.UNKNOWN,
+        ),
+        state=VerificationState.INCONCLUSIVE,
+    )
+
+    from cage.core.verification import create_effect_from_verification
+
+    effect = create_effect_from_verification(
+        effect_id="effect-003",
+        verification=verification,
+    )
+
+    assert effect.state is EffectState.EFFECT_UNKNOWN
+    assert effect.consequence is verification.consequence
+    assert effect.verification_refs == ()
+
+
+@pytest.mark.parametrize(
+    (
+        "adapter_state",
+        "verification_state",
+        "expected_effect_state",
+        "references",
+    ),
+    [
+        (
+            AdapterExecutionState.ACKNOWLEDGED,
+            VerificationState.INCONCLUSIVE,
+            EffectState.EFFECT_UNKNOWN,
+            (),
+        ),
+        (
+            AdapterExecutionState.ERROR,
+            VerificationState.VERIFIED_BOUND,
+            EffectState.BOUND,
+            ("authoritative-record:bound",),
+        ),
+        (
+            AdapterExecutionState.REJECTED,
+            VerificationState.VERIFIED_BOUND,
+            EffectState.BOUND,
+            ("authoritative-record:bound",),
+        ),
+        (
+            AdapterExecutionState.ACKNOWLEDGED,
+            VerificationState.VERIFIED_NO_BIND,
+            EffectState.NO_BIND,
+            ("authoritative-record:no-bind",),
+        ),
+        (
+            AdapterExecutionState.UNKNOWN,
+            VerificationState.VERIFIED_NO_BIND,
+            EffectState.NO_BIND,
+            ("authoritative-record:no-bind",),
+        ),
+    ],
+)
+def test_adapter_state_does_not_control_final_effect_state(
+    adapter_state: AdapterExecutionState,
+    verification_state: VerificationState,
+    expected_effect_state: EffectState,
+    references: tuple[str, ...],
+) -> None:
+    verification = EffectVerificationResult(
+        verification_id="verification-001",
+        adapter_result=_make_adapter_result(
+            state=adapter_state,
+        ),
+        state=verification_state,
+        references=references,
+    )
+
+    from cage.core.verification import create_effect_from_verification
+
+    effect = create_effect_from_verification(
+        effect_id="effect-001",
+        verification=verification,
+    )
+
+    assert verification.adapter_result.state is adapter_state
+    assert verification.state is verification_state
+    assert effect.state is expected_effect_state
+
+
+def test_effect_preserves_verified_consequence_identity() -> None:
+    verification = EffectVerificationResult(
+        verification_id="verification-001",
+        adapter_result=_make_adapter_result(),
+        state=VerificationState.VERIFIED_BOUND,
+        references=[
+            "authoritative-record:456",
+        ],
+    )
+
+    from cage.core.verification import create_effect_from_verification
+
+    effect = create_effect_from_verification(
+        effect_id="effect-001",
+        verification=verification,
+    )
+
+    assert (
+        effect.consequence.consequence_id
+        == verification.consequence.consequence_id
+    )
+
+    assert effect.consequence is verification.consequence
+
+
+def test_create_effect_requires_verification_result() -> None:
+    from cage.core.verification import create_effect_from_verification
+
+    with pytest.raises(
+        TypeError,
+        match="verification must be an EffectVerificationResult",
+    ):
+        create_effect_from_verification(
+            effect_id="effect-001",
+            verification="verification-001",  # type: ignore[arg-type]
+        )    

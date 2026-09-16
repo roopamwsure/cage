@@ -4,6 +4,7 @@ from enum import StrEnum
 
 from cage.core.adapter import AdapterExecutionResult
 from cage.core.consequence import Consequence
+from cage.core.effect import Effect, EffectState
 from cage.core.execution import ExecutionAttempt
 
 
@@ -112,3 +113,33 @@ class EffectVerificationResult:
     @property
     def consequence(self) -> Consequence:
         return self.execution_attempt.consequence
+
+
+def create_effect_from_verification(
+    *,
+    effect_id: str,
+    verification: EffectVerificationResult,
+) -> Effect:
+    if not isinstance(
+        verification,
+        EffectVerificationResult,
+    ):
+        raise TypeError(
+            "verification must be an EffectVerificationResult"
+        )
+
+    if verification.state is VerificationState.VERIFIED_BOUND:
+        effect_state = EffectState.BOUND
+
+    elif verification.state is VerificationState.VERIFIED_NO_BIND:
+        effect_state = EffectState.NO_BIND
+
+    else:
+        effect_state = EffectState.EFFECT_UNKNOWN
+
+    return Effect(
+        effect_id=effect_id,
+        state=effect_state,
+        consequence=verification.consequence,
+        verification_refs=verification.references,
+    )
