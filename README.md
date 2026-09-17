@@ -17,9 +17,9 @@ Those systems may become assurance inputs, adapters, evidence sources, execution
 
 ## Status
 
-Current release target:
+Current release:
 
-**v0.6 — Consequence Custody**
+**v0.6.0 — Consequence Custody**
 
 v0.5 established the Generic Consequence Core: consequence identity, evaluation Attempts, normalized assurance inputs, Decision semantics, Effect semantics, replay, consequence-level idempotency, DecisionProof, EffectProof, and Warrant foundations.
 

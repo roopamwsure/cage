@@ -698,9 +698,9 @@ Before release, verify:
 
 These checks are part of release hardening and must pass before tagging v0.6.0.
 
-Packaging, dependency, clean-install, and import checks have passed against the current pre-release artifact.
+Packaging, dependency, clean-install, import, and version-metadata checks have passed against the v0.6.0 release artifact.
 
-The final version-metadata check remains pending until the explicit v0.6.0 release step updates package metadata to `0.6.0`, rebuilds the release artifact, and revalidates that artifact.
+The validated release artifact reports package metadata version `0.6.0`.
 
 ---
 
@@ -764,13 +764,13 @@ Wheel build                                 PASS
 Clean-environment wheel installation        PASS
 Installed package import                    PASS
 Core module imports                         PASS
-Pre-release installed package metadata      0.5.0
+Release artifact package metadata           0.6.0
 v0.6 scope-discipline audit                 PASS
 ```
 
-Release Gates 1-31 and 33 are satisfied by the current implementation, tests, documentation, and audit evidence.
+All 33 v0.6 Release Gates are satisfied by the current implementation, tests, documentation, packaging, installation, and audit evidence.
 
-Release Gate 32 has passed its packaging, installation, dependency, and clean-import checks. Its final version-metadata requirement remains pending until the explicit v0.6.0 release step changes the package version from `0.5.0` to `0.6.0`, rebuilds the release artifact, and revalidates that artifact before tagging.
+Release Gate 32 is complete: the v0.6.0 wheel was built, installed in a clean environment, imported successfully, and reported package metadata version `0.6.0`.
 
 The final regression checkpoint for the Definition-of-Done audit is:
 
