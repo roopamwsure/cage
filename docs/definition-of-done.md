@@ -747,7 +747,7 @@ v0.6 reconciliation Warrant lineage        COMPLETE
 v0.6 documentation hardening               COMPLETE
 v0.6 Definition-of-Done audit              COMPLETE
 v0.6 pre-release hardening validation       COMPLETE
-v0.6.0 release                             NOT STARTED
+v0.6.0 release                             COMPLETE
 ```
 
 Release-hardening evidence collected during the audit:
