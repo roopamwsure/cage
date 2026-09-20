@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from enum import StrEnum
+from typing import cast
 
 from cage.core.adapter import AdapterExecutionResult
 from cage.core.attempt import Attempt
@@ -11,8 +12,10 @@ from cage.core.custody import (
 )
 from cage.core.decision import Decision
 from cage.core.execution import ExecutionAttempt
-from cage.core.warrant import DecisionProof, Warrant
+from cage.core.warrant import DecisionProof, EffectProof, Warrant
 from cage.errors import CAGETypeError, CAGEValueError
+from cage.core.effect import Effect
+from cage.core.verification import EffectVerificationResult
 
 
 @dataclass(frozen=True, slots=True)
@@ -135,3 +138,83 @@ class ExecutionResult:
     @property
     def idempotency_key(self) -> str:
         return self.evaluation.idempotency_key
+
+@dataclass(frozen=True, slots=True)
+class AssuranceResult:
+    """Immutable developer view of externally verified assurance."""
+
+    execution: ExecutionResult
+    warrant: Warrant
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.execution, ExecutionResult):
+            raise CAGETypeError(
+                "execution must be an ExecutionResult"
+            )
+
+        if not isinstance(self.warrant, Warrant):
+            raise CAGETypeError("warrant must be a Warrant")
+
+        if self.warrant.effect_proof is None:
+            raise CAGEValueError(
+                "AssuranceResult requires a Warrant "
+                "with an EffectProof"
+            )
+
+        if (
+            self.warrant.decision_proof
+            != self.execution.decision_proof
+        ):
+            raise CAGEValueError(
+                "warrant decision proof does not match "
+                "execution evaluation"
+            )
+
+        if (
+            self.warrant.effect_proof.verification.adapter_result
+            != self.execution.adapter_result
+        ):
+            raise CAGEValueError(
+                "warrant effect proof does not match "
+                "execution observation"
+            )
+
+    @property
+    def decision(self) -> Decision:
+        return self.execution.decision
+
+    @property
+    def decision_proof(self) -> DecisionProof:
+        return self.execution.decision_proof
+
+    @property
+    def execution_attempt(self) -> ExecutionAttempt:
+        return self.execution.execution_attempt
+
+    @property
+    def adapter_result(self) -> AdapterExecutionResult:
+        return self.execution.adapter_result
+
+    @property
+    def observation_origin(self) -> ExecutionObservationOrigin:
+        return self.execution.observation_origin
+
+    @property
+    def effect_proof(self) -> EffectProof:
+        return cast(EffectProof, self.warrant.effect_proof)
+
+    @property
+    def effect(self) -> Effect:
+        return self.effect_proof.effect
+
+    @property
+    def verification(self) -> EffectVerificationResult:
+        return self.effect_proof.verification
+
+    @property
+    def consequence_id(self) -> str:
+        return self.execution.consequence_id
+
+    @property
+    def idempotency_key(self) -> str:
+        return self.execution.idempotency_key
