@@ -4,7 +4,11 @@ from enum import Enum
 from typing import TypeAlias
 from uuid import uuid4
 
-from cage.errors import CAGETypeError, CAGEValueError
+from cage.errors import (
+    CAGETypeError,
+    CAGEValueError,
+    IdentifierGenerationError,
+)
 
 
 class IdentityKind(str, Enum):
@@ -41,6 +45,25 @@ def _validate_optional_ids(instance: object) -> None:
 
         if not value.strip():
             raise CAGEValueError(f"{field.name} must not be blank")
+
+
+def _generate_id(id_factory: IdFactory, kind: IdentityKind) -> str:
+    try:
+        generated = id_factory(kind)
+    except Exception as error:
+        raise IdentifierGenerationError(kind) from error
+
+    if not isinstance(generated, str):
+        raise CAGETypeError(
+            f"id_factory must return a string for {kind.value}"
+        )
+
+    if not generated.strip():
+        raise CAGEValueError(
+            f"id_factory must return a nonblank string for {kind.value}"
+        )
+
+    return generated
 
 
 @dataclass(frozen=True, slots=True)
