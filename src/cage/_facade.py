@@ -1,6 +1,14 @@
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass
+from threading import Lock
+
 from cage.config import CAGEConfig
-from cage.core.action import Action
+from cage.core.action import Action, RequestedEffect
+from cage.core.adapter import (
+    AdapterExecutionResult,
+    AdapterExecutionState,
+    EffectAdapter,
+)
 from cage.core.assurance import (
     Approval,
     Context,
@@ -9,25 +17,80 @@ from cage.core.assurance import (
     Standing,
 )
 from cage.core.attempt import Attempt
+from cage.core.capability import ExecutionCapability
 from cage.core.consequence import Consequence
+from cage.core.custody import execute_under_custody
 from cage.core.evaluation import (
     EvaluationRule,
     evaluate_attempt,
 )
+from cage.core.execution import ExecutionAttempt
 from cage.core.idempotency import (
     IdempotencyConflictError,
     IdempotencyRegistry,
 )
 from cage.core.replay import create_replay_attempt
 from cage.core.warrant import Warrant, create_decision_proof
-from cage.errors import CAGETypeError, CAGEValueError
+from cage.errors import (
+    AdapterInvocationError,
+    CAGETypeError,
+    CAGEValueError,
+    DuplicateExecutionError,
+)
 from cage.identifiers import (
     EvaluationIds,
     IdentityKind,
     _generate_id,
 )
 from cage.inputs import CAGEInputs
-from cage.results import EvaluationResult
+from cage.results import (
+    EvaluationResult,
+    ExecutionObservationOrigin,
+    ExecutionResult,
+)
+
+
+@dataclass(slots=True)
+class _DispatchRecord:
+    execution_attempt: ExecutionAttempt
+    dispatched: bool = False
+    execution: ExecutionResult | None = None
+
+
+class _AdapterCallbackFailure(Exception):
+    def __init__(self, error: Exception) -> None:
+        self.error = error
+        super().__init__("adapter callback failed")
+
+
+class _DispatchTrackingAdapter:
+    def __init__(
+        self,
+        *,
+        adapter: EffectAdapter,
+        mark_dispatched: Callable[[], None],
+    ) -> None:
+        self._adapter = adapter
+        self._mark_dispatched = mark_dispatched
+
+    def execute(
+        self,
+        *,
+        execution_attempt: ExecutionAttempt,
+        effect: RequestedEffect,
+        capability: ExecutionCapability,
+    ) -> AdapterExecutionResult:
+        self._mark_dispatched()
+
+        try:
+            return self._adapter.execute(
+                execution_attempt=execution_attempt,
+                effect=effect,
+                capability=capability,
+            )
+        except Exception as error:
+            raise _AdapterCallbackFailure(error) from error
+
 
 def _validate_replay_ids(
     *,
@@ -64,14 +127,17 @@ def _validate_replay_ids(
                 "evaluation identity"
             )
 
+
 class CAGE:
     """High-level orchestrator for the CAGE lifecycle."""
 
     __slots__ = (
         "_config",
+        "_dispatch_records",
         "_idempotency_registry",
         "_inputs",
         "_rule",
+        "_state_lock",
     )
 
     def __init__(
@@ -96,6 +162,8 @@ class CAGE:
             id_factory=resolved_config.id_factory
         )
         self._idempotency_registry = IdempotencyRegistry()
+        self._dispatch_records: dict[str, _DispatchRecord] = {}
+        self._state_lock = Lock()
 
     @property
     def config(self) -> CAGEConfig:
@@ -125,6 +193,7 @@ class CAGE:
             raise CAGETypeError(
                 "previous must be an EvaluationResult or None"
             )
+
         if (
             previous is not None
             and idempotency_key != previous.idempotency_key
@@ -140,6 +209,7 @@ class CAGE:
             )
 
         resolved_ids = EvaluationIds() if ids is None else ids
+
         if previous is not None:
             _validate_replay_ids(
                 previous=previous,
@@ -164,21 +234,25 @@ class CAGE:
                 idempotency_key=idempotency_key,
                 action=action,
             )
-            consequence = self._idempotency_registry.resolve(
-                candidate_consequence
-            )
+
+            with self._state_lock:
+                consequence = self._idempotency_registry.resolve(
+                    candidate_consequence
+                )
         else:
-            self._idempotency_registry.resolve(
-                previous.consequence
-            )
             candidate_consequence = Consequence(
                 consequence_id=previous.consequence_id,
                 idempotency_key=idempotency_key,
                 action=action,
             )
-            consequence = self._idempotency_registry.resolve(
-                candidate_consequence
-            )
+
+            with self._state_lock:
+                self._idempotency_registry.resolve(
+                    previous.consequence
+                )
+                consequence = self._idempotency_registry.resolve(
+                    candidate_consequence
+                )
 
         attempt_id = (
             resolved_ids.attempt_id
@@ -250,3 +324,150 @@ class CAGE:
         )
 
         return EvaluationResult(warrant=warrant)
+
+    def execute(
+        self,
+        evaluation: EvaluationResult,
+        *,
+        adapter: EffectAdapter,
+        capability: ExecutionCapability,
+        execution_attempt_id: str | None = None,
+    ) -> ExecutionResult:
+        if not isinstance(evaluation, EvaluationResult):
+            raise CAGETypeError(
+                "evaluation must be an EvaluationResult"
+            )
+
+        if not isinstance(capability, ExecutionCapability):
+            raise CAGETypeError(
+                "capability must be an ExecutionCapability"
+            )
+
+        if not isinstance(adapter, EffectAdapter):
+            raise CAGETypeError(
+                "adapter must satisfy EffectAdapter"
+            )
+
+        if (
+            execution_attempt_id is not None
+            and not isinstance(execution_attempt_id, str)
+        ):
+            raise CAGETypeError(
+                "execution_attempt_id must be a string or None"
+            )
+
+        if (
+            isinstance(execution_attempt_id, str)
+            and not execution_attempt_id.strip()
+        ):
+            raise CAGEValueError(
+                "execution_attempt_id must not be blank"
+            )
+
+        resolved_execution_attempt_id = (
+            _generate_id(
+                self._config.id_factory,
+                IdentityKind.EXECUTION_ATTEMPT,
+            )
+            if execution_attempt_id is None
+            else execution_attempt_id
+        )
+
+        recovery_result_id = _generate_id(
+            self._config.id_factory,
+            IdentityKind.ADAPTER_RESULT,
+        )
+
+        execution_attempt = ExecutionAttempt(
+            execution_attempt_id=resolved_execution_attempt_id,
+            decision=evaluation.decision,
+        )
+
+        with self._state_lock:
+            canonical_consequence = (
+                self._idempotency_registry.resolve(
+                    evaluation.consequence
+                )
+            )
+            consequence_id = canonical_consequence.consequence_id
+            existing_record = self._dispatch_records.get(
+                consequence_id
+            )
+
+            if existing_record is not None:
+                raise DuplicateExecutionError(
+                    execution_attempt=(
+                        existing_record.execution_attempt
+                    ),
+                    consequence_id=consequence_id,
+                    execution=existing_record.execution,
+                )
+
+            record = _DispatchRecord(
+                execution_attempt=execution_attempt
+            )
+            self._dispatch_records[consequence_id] = record
+
+        def mark_dispatched() -> None:
+            with self._state_lock:
+                record.dispatched = True
+
+        tracking_adapter = _DispatchTrackingAdapter(
+            adapter=adapter,
+            mark_dispatched=mark_dispatched,
+        )
+
+        try:
+            adapter_result = execute_under_custody(
+                execution_attempt=execution_attempt,
+                capability=capability,
+                adapter=tracking_adapter,
+            )
+        except _AdapterCallbackFailure as failure:
+            recovery_adapter_result = AdapterExecutionResult(
+                result_id=recovery_result_id,
+                execution_attempt=execution_attempt,
+                state=AdapterExecutionState.UNKNOWN,
+                references=(
+                    "urn:cage:sdk:recovery-observation",
+                ),
+            )
+            recovery_execution = ExecutionResult(
+                evaluation=evaluation,
+                capability=capability,
+                adapter_result=recovery_adapter_result,
+                observation_origin=(
+                    ExecutionObservationOrigin.SDK_RECOVERY
+                ),
+            )
+
+            with self._state_lock:
+                record.execution = recovery_execution
+
+            raise AdapterInvocationError(
+                "adapter invocation failed after dispatch began",
+                execution=recovery_execution,
+            ) from failure.error
+        except BaseException:
+            with self._state_lock:
+                if not record.dispatched:
+                    current_record = self._dispatch_records.get(
+                        consequence_id
+                    )
+
+                    if current_record is record:
+                        del self._dispatch_records[consequence_id]
+
+            raise
+
+        execution = ExecutionResult(
+            evaluation=evaluation,
+            capability=capability,
+            adapter_result=adapter_result,
+            observation_origin=ExecutionObservationOrigin.ADAPTER,
+        )
+
+        with self._state_lock:
+            record.execution = execution
+
+        return execution

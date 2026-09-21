@@ -1,7 +1,9 @@
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from cage.core.execution import ExecutionAttempt
     from cage.identifiers import IdentityKind
+    from cage.results import ExecutionResult
 
 
 class CAGEError(Exception):
@@ -21,4 +23,43 @@ class IdentifierGenerationError(CAGEError):
 
     def __init__(self, kind: "IdentityKind") -> None:
         self.kind = kind
-        super().__init__(f"failed to generate {kind.value} identifier")
+        super().__init__(
+            f"failed to generate {kind.value} identifier"
+        )
+
+
+class ExecutionError(CAGEError):
+    """Base class for facade execution failures after possible dispatch."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        execution: "ExecutionResult",
+    ) -> None:
+        self.execution = execution
+        super().__init__(message)
+
+
+class AdapterInvocationError(ExecutionError):
+    """Raised when an adapter callback raises after dispatch begins."""
+
+
+class DuplicateExecutionError(CAGEError, RuntimeError):
+    """Raised when a Consequence is already reserved for execution."""
+
+    def __init__(
+        self,
+        *,
+        execution_attempt: "ExecutionAttempt",
+        consequence_id: str,
+        execution: "ExecutionResult | None" = None,
+    ) -> None:
+        self.execution_attempt = execution_attempt
+        self.consequence_id = consequence_id
+        self.execution = execution
+
+        super().__init__(
+            "execution dispatch is already reserved for "
+            f"consequence {consequence_id}"
+        )
