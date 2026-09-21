@@ -45,6 +45,10 @@ class AdapterInvocationError(ExecutionError):
     """Raised when an adapter callback raises after dispatch begins."""
 
 
+class AdapterContractError(ExecutionError):
+    """Raised when an adapter returns an invalid result after dispatch."""
+
+
 class DuplicateExecutionError(CAGEError, RuntimeError):
     """Raised when a Consequence is already reserved for execution."""
 

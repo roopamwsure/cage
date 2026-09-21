@@ -18,6 +18,7 @@ from cage.core.execution import ExecutionAttempt
 from cage.errors import (
     AdapterInvocationError,
     DuplicateExecutionError,
+    ExecutionError,
 )
 from cage.identifiers import EvaluationIds, IdentityKind
 from cage.results import (
@@ -73,6 +74,21 @@ class RaisingAdapter:
     ) -> AdapterExecutionResult:
         self.calls += 1
         raise self.error
+
+
+class InvalidReturnAdapter:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def execute(
+        self,
+        *,
+        execution_attempt: ExecutionAttempt,
+        effect: RequestedEffect,
+        capability: ExecutionCapability,
+    ) -> AdapterExecutionResult:
+        self.calls += 1
+        return None  # type: ignore[return-value]
 
 
 def test_execute_dispatches_admitted_evaluation_under_custody() -> None:
@@ -457,6 +473,85 @@ def test_execute_adapter_exception_retains_recovery_context() -> None:
         recovery.adapter_result.result_id
         == "adapter_result-1"
     )
+    assert recovery.adapter_result.references == (
+        "urn:cage:sdk:recovery-observation",
+    )
+    assert (
+        recovery.adapter_result.execution_attempt
+        is recovery.execution_attempt
+    )
+
+    with pytest.raises(DuplicateExecutionError) as duplicate:
+        cage.execute(
+            evaluation,
+            adapter=adapter,
+            capability=capability,
+        )
+
+    assert adapter.calls == 1
+    assert (
+        duplicate.value.execution_attempt
+        is recovery.execution_attempt
+    )
+    assert duplicate.value.execution is recovery
+
+
+def test_execute_invalid_adapter_return_retains_recovery_context() -> None:
+    counters: dict[IdentityKind, int] = {}
+
+    def sequential_id(kind: IdentityKind) -> str:
+        counters[kind] = counters.get(kind, 0) + 1
+        return f"{kind.value}-{counters[kind]}"
+
+    cage = CAGE(
+        rule=lambda *args: EvaluationOutcome(
+            state=DecisionState.ADMITTED
+        ),
+        config=CAGEConfig(id_factory=sequential_id),
+    )
+
+    action = cage.inputs.action(
+        action_type="database.delete",
+        principal_id="principal-1",
+        agent_id="agent-1",
+        resource_id="record-1",
+        requested_effect={"record_id": 1},
+    )
+    evaluation = cage.evaluate(
+        action=action,
+        idempotency_key="delete-account-invalid-return",
+    )
+    capability = ExecutionCapability(
+        capability_id="capability-1",
+        consequence_id=evaluation.consequence_id,
+        action_type="database.delete",
+        resource_id="record-1",
+    )
+    adapter = InvalidReturnAdapter()
+
+    with pytest.raises(ExecutionError) as captured:
+        cage.execute(
+            evaluation,
+            adapter=adapter,
+            capability=capability,
+        )
+
+    error = captured.value
+    recovery = error.execution
+
+    assert type(error).__name__ == "AdapterContractError"
+    assert adapter.calls == 1
+    assert recovery.evaluation is evaluation
+    assert recovery.capability is capability
+    assert (
+        recovery.observation_origin
+        is ExecutionObservationOrigin.SDK_RECOVERY
+    )
+    assert (
+        recovery.adapter_result.state
+        is AdapterExecutionState.UNKNOWN
+    )
+    assert recovery.adapter_result.result_id == "adapter_result-1"
     assert recovery.adapter_result.references == (
         "urn:cage:sdk:recovery-observation",
     )

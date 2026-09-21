@@ -32,6 +32,7 @@ from cage.core.idempotency import (
 from cage.core.replay import create_replay_attempt
 from cage.core.warrant import Warrant, create_decision_proof
 from cage.errors import (
+    AdapterContractError,
     AdapterInvocationError,
     CAGETypeError,
     CAGEValueError,
@@ -448,6 +449,37 @@ class CAGE:
                 "adapter invocation failed after dispatch began",
                 execution=recovery_execution,
             ) from failure.error
+        except TypeError as error:
+            with self._state_lock:
+                dispatched = record.dispatched
+
+            if not dispatched:
+                raise
+
+            recovery_adapter_result = AdapterExecutionResult(
+                result_id=recovery_result_id,
+                execution_attempt=execution_attempt,
+                state=AdapterExecutionState.UNKNOWN,
+                references=(
+                    "urn:cage:sdk:recovery-observation",
+                ),
+            )
+            recovery_execution = ExecutionResult(
+                evaluation=evaluation,
+                capability=capability,
+                adapter_result=recovery_adapter_result,
+                observation_origin=(
+                    ExecutionObservationOrigin.SDK_RECOVERY
+                ),
+            )
+
+            with self._state_lock:
+                record.execution = recovery_execution
+
+            raise AdapterContractError(
+                "adapter returned an invalid result after dispatch began",
+                execution=recovery_execution,
+            ) from error
         except BaseException:
             with self._state_lock:
                 if not record.dispatched:
