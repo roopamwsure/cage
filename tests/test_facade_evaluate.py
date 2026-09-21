@@ -1,8 +1,12 @@
+import pytest
+
 from cage._facade import CAGE
 from cage.config import CAGEConfig
 from cage.core.attempt import Attempt
 from cage.core.decision import DecisionState
+from cage.errors import CAGETypeError, CAGEValueError
 from cage.core.evaluation import EvaluationOutcome
+from cage.core.idempotency import IdempotencyConflictError
 from cage.identifiers import EvaluationIds, IdentityKind
 from cage.results import EvaluationResult
 
@@ -39,7 +43,10 @@ def test_evaluate_builds_decision_only_assurance_lineage() -> None:
         principal_id="principal-1",
         agent_id="agent-1",
         resource_id="record-1",
-        requested_effect={"table": "accounts", "record_id": 1},
+        requested_effect={
+            "table": "accounts",
+            "record_id": 1,
+        },
     )
     evidence = cage.inputs.evidence(
         evidence_type="change.ticket",
@@ -98,7 +105,9 @@ def test_evaluate_builds_decision_only_assurance_lineage() -> None:
     assert result.decision_proof.delegation_refs == (
         "delegation-generated",
     )
-    assert result.decision_proof.approval_refs == ("approval-generated",)
+    assert result.decision_proof.approval_refs == (
+        "approval-generated",
+    )
     assert result.decision_proof.context_refs == ("context-generated",)
 
     assert result.warrant.warrant_id == "warrant-generated"
@@ -113,6 +122,7 @@ def test_evaluate_builds_decision_only_assurance_lineage() -> None:
     assert observed["delegations"] == (delegation,)
     assert observed["approvals"] == (approval,)
     assert observed["context"] == (context,)
+
 
 def test_evaluate_preserves_explicit_lifecycle_ids() -> None:
     def unexpected_factory(kind: IdentityKind) -> str:
@@ -154,6 +164,8 @@ def test_evaluate_preserves_explicit_lifecycle_ids() -> None:
     assert result.decision.state is DecisionState.REFUSED
     assert result.decision_proof.proof_id == "decision-proof-explicit"
     assert result.warrant.warrant_id == "warrant-explicit"
+
+
 def test_evaluate_reuses_equivalent_canonical_consequence() -> None:
     counters: dict[IdentityKind, int] = {}
 
@@ -191,3 +203,258 @@ def test_evaluate_reuses_equivalent_canonical_consequence() -> None:
     assert second.attempt.attempt_id != first.attempt.attempt_id
     assert second.decision.decision_id != first.decision.decision_id
     assert second.warrant.warrant_id != first.warrant.warrant_id
+
+
+def test_evaluate_replays_with_new_linked_assurance_lineage() -> None:
+    counters: dict[IdentityKind, int] = {}
+    observed_attempts: list[Attempt] = []
+    observed_evidence: list[tuple[object, ...]] = []
+
+    def sequential_id(kind: IdentityKind) -> str:
+        counters[kind] = counters.get(kind, 0) + 1
+        return f"{kind.value}-{counters[kind]}"
+
+    def rule(
+        attempt,
+        evidence,
+        standing,
+        delegations,
+        approvals,
+        context,
+    ) -> EvaluationOutcome:
+        observed_attempts.append(attempt)
+        observed_evidence.append(evidence)
+        return EvaluationOutcome(state=DecisionState.ADMITTED)
+
+    cage = CAGE(
+        rule=rule,
+        config=CAGEConfig(id_factory=sequential_id),
+    )
+
+    action = cage.inputs.action(
+        action_type="database.delete",
+        principal_id="principal-1",
+        agent_id="agent-1",
+        resource_id="record-1",
+        requested_effect={"record_id": 1},
+    )
+    replay_evidence = cage.inputs.evidence(
+        evidence_type="change.ticket",
+        subject="database.delete",
+        source="change-management",
+        data={"ticket": "CHG-2"},
+    )
+
+    first = cage.evaluate(
+        action=action,
+        idempotency_key="delete-account-1",
+    )
+    replay = cage.evaluate(
+        action=action,
+        idempotency_key="delete-account-1",
+        evidence=(replay_evidence,),
+        previous=first,
+    )
+
+    assert replay.consequence is first.consequence
+    assert replay.consequence_id == first.consequence_id
+
+    assert replay.attempt is not first.attempt
+    assert replay.attempt.attempt_id != first.attempt.attempt_id
+    assert replay.attempt.previous_attempt_id == first.attempt.attempt_id
+
+    assert replay.decision.decision_id != first.decision.decision_id
+    assert replay.decision_proof.proof_id != first.decision_proof.proof_id
+    assert replay.decision_proof.evidence_refs == (
+        replay_evidence.evidence_id,
+    )
+
+    assert replay.warrant.warrant_id != first.warrant.warrant_id
+    assert replay.warrant.previous_warrant_id == first.warrant.warrant_id
+    assert replay.warrant.effect_proof is None
+
+    assert observed_attempts == [first.attempt, replay.attempt]
+    assert observed_evidence == [(), (replay_evidence,)]
+
+
+def test_evaluate_replay_rejects_different_idempotency_key() -> None:
+    cage = CAGE(
+        rule=lambda *args: EvaluationOutcome(
+            state=DecisionState.ADMITTED
+        )
+    )
+
+    action = cage.inputs.action(
+        action_type="database.delete",
+        principal_id="principal-1",
+        agent_id="agent-1",
+        resource_id="record-1",
+        requested_effect={"record_id": 1},
+    )
+
+    first = cage.evaluate(
+        action=action,
+        idempotency_key="delete-account-1",
+    )
+
+    with pytest.raises(
+        IdempotencyConflictError,
+        match="replay idempotency_key does not match",
+    ):
+        cage.evaluate(
+            action=action,
+            idempotency_key="different-operation",
+            previous=first,
+        )
+def test_evaluate_replay_rejects_different_action() -> None:
+    cage = CAGE(
+        rule=lambda *args: EvaluationOutcome(
+            state=DecisionState.ADMITTED
+        )
+    )
+
+    original_action = cage.inputs.action(
+        action_type="database.delete",
+        principal_id="principal-1",
+        agent_id="agent-1",
+        resource_id="record-1",
+        requested_effect={"record_id": 1},
+    )
+    conflicting_action = cage.inputs.action(
+        action_type="database.delete",
+        principal_id="principal-1",
+        agent_id="agent-1",
+        resource_id="record-1",
+        requested_effect={"record_id": 2},
+    )
+
+    first = cage.evaluate(
+        action=original_action,
+        idempotency_key="delete-account-1",
+    )
+
+    with pytest.raises(
+        IdempotencyConflictError,
+        match="idempotency key is already associated",
+    ):
+        cage.evaluate(
+            action=conflicting_action,
+            idempotency_key="delete-account-1",
+            previous=first,
+        )
+
+@pytest.mark.parametrize(
+    ("field_name", "reused_id"),
+    [
+        ("attempt_id", "attempt-first"),
+        ("decision_id", "decision-first"),
+        ("decision_proof_id", "decision-proof-first"),
+        ("warrant_id", "warrant-first"),
+    ],
+)
+def test_evaluate_replay_rejects_predecessor_event_id_reuse(
+    field_name: str,
+    reused_id: str,
+) -> None:
+    cage = CAGE(
+        rule=lambda *args: EvaluationOutcome(
+            state=DecisionState.ADMITTED
+        )
+    )
+
+    action = cage.inputs.action(
+        action_type="database.delete",
+        principal_id="principal-1",
+        agent_id="agent-1",
+        resource_id="record-1",
+        requested_effect={"record_id": 1},
+    )
+
+    first = cage.evaluate(
+        action=action,
+        idempotency_key="delete-account-1",
+        ids=EvaluationIds(
+            consequence_id="consequence-first",
+            attempt_id="attempt-first",
+            decision_id="decision-first",
+            decision_proof_id="decision-proof-first",
+            warrant_id="warrant-first",
+        ),
+    )
+
+    replay_ids = EvaluationIds(
+        **{field_name: reused_id}
+    )
+
+    with pytest.raises(
+        CAGEValueError,
+        match=f"{field_name} must not reuse the previous",
+    ):
+        cage.evaluate(
+            action=action,
+            idempotency_key="delete-account-1",
+            previous=first,
+            ids=replay_ids,
+        )
+@pytest.mark.parametrize(
+    "invalid_previous",
+    ["previous", 42, object()],
+)
+def test_evaluate_rejects_invalid_previous(
+    invalid_previous: object,
+) -> None:
+    cage = CAGE(
+        rule=lambda *args: EvaluationOutcome(
+            state=DecisionState.ADMITTED
+        )
+    )
+
+    action = cage.inputs.action(
+        action_type="database.delete",
+        principal_id="principal-1",
+        agent_id="agent-1",
+        resource_id="record-1",
+        requested_effect={"record_id": 1},
+    )
+
+    with pytest.raises(
+        CAGETypeError,
+        match="previous must be an EvaluationResult or None",
+    ):
+        cage.evaluate(
+            action=action,
+            idempotency_key="delete-account-1",
+            previous=invalid_previous,  # type: ignore[arg-type]
+        )
+
+
+@pytest.mark.parametrize(
+    "invalid_ids",
+    ["ids", 42, object()],
+)
+def test_evaluate_rejects_invalid_ids(
+    invalid_ids: object,
+) -> None:
+    cage = CAGE(
+        rule=lambda *args: EvaluationOutcome(
+            state=DecisionState.ADMITTED
+        )
+    )
+
+    action = cage.inputs.action(
+        action_type="database.delete",
+        principal_id="principal-1",
+        agent_id="agent-1",
+        resource_id="record-1",
+        requested_effect={"record_id": 1},
+    )
+
+    with pytest.raises(
+        CAGETypeError,
+        match="ids must be an EvaluationIds or None",
+    ):
+        cage.evaluate(
+            action=action,
+            idempotency_key="delete-account-1",
+            ids=invalid_ids,  # type: ignore[arg-type]
+        )
