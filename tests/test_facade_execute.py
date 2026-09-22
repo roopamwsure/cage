@@ -1375,3 +1375,135 @@ def test_execute_recovery_assembly_failure_occurs_before_dispatch(
 
     assert adapter.calls == 1
     assert duplicate.value.execution is recovery
+
+
+def test_execute_duplicate_context_updates_after_recovery() -> None:
+    class BlockingFailureAdapter:
+        def __init__(self) -> None:
+            self.calls = 0
+            self.entered = Event()
+            self.release = Event()
+
+        def execute(
+            self,
+            *,
+            execution_attempt: ExecutionAttempt,
+            effect: RequestedEffect,
+            capability: ExecutionCapability,
+        ) -> AdapterExecutionResult:
+            self.calls += 1
+            self.entered.set()
+
+            if not self.release.wait(timeout=5):
+                raise RuntimeError(
+                    "test timed out waiting to release adapter"
+                )
+
+            raise RuntimeError("adapter failed after dispatch")
+
+    cage = CAGE(
+        rule=lambda *args: EvaluationOutcome(
+            state=DecisionState.ADMITTED
+        )
+    )
+
+    action = cage.inputs.action(
+        action_type="database.delete",
+        principal_id="principal-1",
+        agent_id="agent-1",
+        resource_id="record-1",
+        requested_effect={"record_id": 1},
+    )
+    evaluation = cage.evaluate(
+        action=action,
+        idempotency_key="delete-account-recovery-transition",
+    )
+    capability = ExecutionCapability(
+        capability_id="capability-1",
+        consequence_id=evaluation.consequence_id,
+        action_type="database.delete",
+        resource_id="record-1",
+    )
+    adapter = BlockingFailureAdapter()
+    first_errors: list[BaseException] = []
+
+    def first_call() -> None:
+        try:
+            cage.execute(
+                evaluation,
+                adapter=adapter,
+                capability=capability,
+            )
+        except BaseException as error:
+            first_errors.append(error)
+
+    first_thread = Thread(target=first_call)
+    first_thread.start()
+
+    assert adapter.entered.wait(timeout=5)
+
+    try:
+        with pytest.raises(
+            DuplicateExecutionError
+        ) as in_progress_duplicate:
+            cage.execute(
+                evaluation,
+                adapter=adapter,
+                capability=capability,
+            )
+
+        assert adapter.calls == 1
+        assert in_progress_duplicate.value.execution is None
+        assert (
+            in_progress_duplicate.value.consequence_id
+            == evaluation.consequence_id
+        )
+    finally:
+        adapter.release.set()
+
+    first_thread.join(timeout=5)
+
+    assert not first_thread.is_alive()
+    assert len(first_errors) == 1
+    assert isinstance(
+        first_errors[0],
+        AdapterInvocationError,
+    )
+
+    invocation_error = first_errors[0]
+
+    assert isinstance(
+        invocation_error,
+        AdapterInvocationError,
+    )
+
+    recovery = invocation_error.execution
+
+    assert (
+        recovery.observation_origin
+        is ExecutionObservationOrigin.SDK_RECOVERY
+    )
+    assert (
+        recovery.adapter_result.state
+        is AdapterExecutionState.UNKNOWN
+    )
+    assert (
+        in_progress_duplicate.value.execution_attempt
+        is recovery.execution_attempt
+    )
+
+    with pytest.raises(
+        DuplicateExecutionError
+    ) as finalized_duplicate:
+        cage.execute(
+            evaluation,
+            adapter=adapter,
+            capability=capability,
+        )
+
+    assert adapter.calls == 1
+    assert (
+        finalized_duplicate.value.execution_attempt
+        is recovery.execution_attempt
+    )
+    assert finalized_duplicate.value.execution is recovery
