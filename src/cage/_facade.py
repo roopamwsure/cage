@@ -504,13 +504,26 @@ class CAGE:
             ) from error
         except BaseException:
             with self._state_lock:
-                if not record.dispatched:
+                dispatched = record.dispatched
+
+                if not dispatched:
                     current_record = self._dispatch_records.get(
                         consequence_id
                     )
 
                     if current_record is record:
                         del self._dispatch_records[consequence_id]
+
+            if dispatched:
+                recovery_execution = _create_sdk_recovery_execution(
+                    evaluation=evaluation,
+                    capability=capability,
+                    execution_attempt=execution_attempt,
+                    result_id=recovery_result_id,
+                )
+
+                with self._state_lock:
+                    record.execution = recovery_execution
 
             raise
 

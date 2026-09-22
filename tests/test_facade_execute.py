@@ -66,7 +66,7 @@ class RecordingAdapter:
 
 
 class RaisingAdapter:
-    def __init__(self, error: Exception) -> None:
+    def __init__(self, error: BaseException) -> None:
         self.error = error
         self.calls = 0
 
@@ -1108,4 +1108,76 @@ def test_execute_id_factory_failure_does_not_reserve_dispatch() -> None:
     assert (
         result.observation_origin
         is ExecutionObservationOrigin.ADAPTER
+    )
+
+
+@pytest.mark.parametrize(
+    "error_type",
+    [
+        KeyboardInterrupt,
+        SystemExit,
+    ],
+)
+def test_execute_interruption_finalizes_recovery_before_reraise(
+    error_type: type[BaseException],
+) -> None:
+    cage = CAGE(
+        rule=lambda *args: EvaluationOutcome(
+            state=DecisionState.ADMITTED
+        )
+    )
+
+    action = cage.inputs.action(
+        action_type="database.delete",
+        principal_id="principal-1",
+        agent_id="agent-1",
+        resource_id="record-1",
+        requested_effect={"record_id": 1},
+    )
+    evaluation = cage.evaluate(
+        action=action,
+        idempotency_key="delete-account-interruption",
+    )
+    capability = ExecutionCapability(
+        capability_id="capability-1",
+        consequence_id=evaluation.consequence_id,
+        action_type="database.delete",
+        resource_id="record-1",
+    )
+    interruption = error_type()
+    adapter = RaisingAdapter(interruption)
+
+    with pytest.raises(error_type) as captured:
+        cage.execute(
+            evaluation,
+            adapter=adapter,
+            capability=capability,
+        )
+
+    assert captured.value is interruption
+    assert adapter.calls == 1
+
+    with pytest.raises(DuplicateExecutionError) as duplicate:
+        cage.execute(
+            evaluation,
+            adapter=adapter,
+            capability=capability,
+        )
+
+    assert adapter.calls == 1
+    assert duplicate.value.execution is not None
+
+    recovery = duplicate.value.execution
+
+    assert (
+        recovery.observation_origin
+        is ExecutionObservationOrigin.SDK_RECOVERY
+    )
+    assert (
+        recovery.adapter_result.state
+        is AdapterExecutionState.UNKNOWN
+    )
+    assert (
+        duplicate.value.execution_attempt
+        is recovery.execution_attempt
     )
