@@ -1,4 +1,6 @@
-﻿from cage._facade import CAGE
+import pytest
+
+from cage._facade import CAGE
 from cage.config import CAGEConfig
 from cage.core.action import RequestedEffect
 from cage.core.adapter import (
@@ -127,3 +129,91 @@ def test_verify_creates_bound_assurance_result() -> None:
     )
     assert assurance.decision_proof is evaluation.decision_proof
     assert assurance.adapter_result is execution.adapter_result
+
+
+@pytest.mark.parametrize(
+    (
+        "verification_state",
+        "references",
+        "expected_effect_state",
+    ),
+    [
+        (
+            VerificationState.VERIFIED_NO_BIND,
+            ("provider-observation-no-bind",),
+            EffectState.NO_BIND,
+        ),
+        (
+            VerificationState.INCONCLUSIVE,
+            (),
+            EffectState.EFFECT_UNKNOWN,
+        ),
+    ],
+)
+def test_verify_maps_verification_state_to_effect(
+    verification_state: VerificationState,
+    references: tuple[str, ...],
+    expected_effect_state: EffectState,
+) -> None:
+    class StateVerifier:
+        def verify(
+            self,
+            *,
+            adapter_result: AdapterExecutionResult,
+        ) -> EffectVerificationResult:
+            return EffectVerificationResult(
+                verification_id="verification-state-1",
+                adapter_result=adapter_result,
+                state=verification_state,
+                references=references,
+            )
+
+    cage = CAGE(
+        rule=lambda *args: EvaluationOutcome(
+            state=DecisionState.ADMITTED
+        ),
+        config=CAGEConfig(
+            id_factory=lambda kind: f"{kind.value}-generated"
+        ),
+    )
+
+    action = cage.inputs.action(
+        action_type="database.delete",
+        principal_id="principal-1",
+        agent_id="agent-1",
+        resource_id="record-1",
+        requested_effect={"record_id": 1},
+    )
+    evaluation = cage.evaluate(
+        action=action,
+        idempotency_key=(
+            f"delete-account-{verification_state.value}"
+        ),
+    )
+    capability = ExecutionCapability(
+        capability_id="capability-1",
+        consequence_id=evaluation.consequence_id,
+        action_type="database.delete",
+        resource_id="record-1",
+    )
+    execution = cage.execute(
+        evaluation,
+        adapter=AcknowledgingAdapter(),
+        capability=capability,
+    )
+
+    assurance = cage.verify(
+        execution,
+        verifier=StateVerifier(),
+        ids=AssuranceIds(
+            effect_id="effect-state-1",
+            effect_proof_id="effect-proof-state-1",
+            warrant_id="assurance-warrant-state-1",
+        ),
+    )
+
+    assert assurance.verification.state is verification_state
+    assert assurance.verification.references == references
+    assert assurance.effect.state is expected_effect_state
+    assert assurance.effect.verification_refs == references
+    assert assurance.execution is execution
