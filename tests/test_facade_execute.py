@@ -9,6 +9,7 @@ from cage.core.adapter import (
 )
 from cage.core.capability import ExecutionCapability
 from cage.core.custody import (
+    AdapterResultMismatchError as CoreAdapterResultMismatchError,
     CapabilityMismatchError,
     CustodyIneligibleError,
 )
@@ -90,6 +91,32 @@ class InvalidReturnAdapter:
         self.calls += 1
         return None  # type: ignore[return-value]
 
+class MismatchedResultAdapter:
+    def __init__(self) -> None:
+        self.calls = 0
+        self.returned_result: AdapterExecutionResult | None = None
+
+    def execute(
+        self,
+        *,
+        execution_attempt: ExecutionAttempt,
+        effect: RequestedEffect,
+        capability: ExecutionCapability,
+    ) -> AdapterExecutionResult:
+        self.calls += 1
+
+        wrong_attempt = ExecutionAttempt(
+            execution_attempt_id="execution-attempt-wrong",
+            decision=execution_attempt.decision,
+        )
+        result = AdapterExecutionResult(
+            result_id="adapter-result-mismatched",
+            execution_attempt=wrong_attempt,
+            state=AdapterExecutionState.ACKNOWLEDGED,
+            references=("provider-receipt-mismatched",),
+        )
+        self.returned_result = result
+        return result
 
 def test_execute_dispatches_admitted_evaluation_under_custody() -> None:
     def deterministic_id(kind: IdentityKind) -> str:
@@ -558,6 +585,101 @@ def test_execute_invalid_adapter_return_retains_recovery_context() -> None:
     assert (
         recovery.adapter_result.execution_attempt
         is recovery.execution_attempt
+    )
+
+    with pytest.raises(DuplicateExecutionError) as duplicate:
+        cage.execute(
+            evaluation,
+            adapter=adapter,
+            capability=capability,
+        )
+
+    assert adapter.calls == 1
+    assert (
+        duplicate.value.execution_attempt
+        is recovery.execution_attempt
+    )
+    assert duplicate.value.execution is recovery
+
+def test_execute_mismatched_adapter_result_retains_recovery_context() -> None:
+    counters: dict[IdentityKind, int] = {}
+
+    def sequential_id(kind: IdentityKind) -> str:
+        counters[kind] = counters.get(kind, 0) + 1
+        return f"{kind.value}-{counters[kind]}"
+
+    cage = CAGE(
+        rule=lambda *args: EvaluationOutcome(
+            state=DecisionState.ADMITTED
+        ),
+        config=CAGEConfig(id_factory=sequential_id),
+    )
+
+    action = cage.inputs.action(
+        action_type="database.delete",
+        principal_id="principal-1",
+        agent_id="agent-1",
+        resource_id="record-1",
+        requested_effect={"record_id": 1},
+    )
+    evaluation = cage.evaluate(
+        action=action,
+        idempotency_key="delete-account-mismatched-result",
+    )
+    capability = ExecutionCapability(
+        capability_id="capability-1",
+        consequence_id=evaluation.consequence_id,
+        action_type="database.delete",
+        resource_id="record-1",
+    )
+    adapter = MismatchedResultAdapter()
+
+    with pytest.raises(ExecutionError) as captured:
+        cage.execute(
+            evaluation,
+            adapter=adapter,
+            capability=capability,
+        )
+
+    error = captured.value
+    recovery = error.execution
+
+    assert type(error).__name__ == "AdapterResultMismatchError"
+    assert isinstance(error, CoreAdapterResultMismatchError)
+    assert isinstance(error.__cause__, CoreAdapterResultMismatchError)
+
+    assert adapter.calls == 1
+    assert adapter.returned_result is not None
+    assert (
+        adapter.returned_result.result_id
+        == "adapter-result-mismatched"
+    )
+    assert (
+        adapter.returned_result.execution_attempt.execution_attempt_id
+        == "execution-attempt-wrong"
+    )
+
+    assert recovery.evaluation is evaluation
+    assert recovery.capability is capability
+    assert (
+        recovery.observation_origin
+        is ExecutionObservationOrigin.SDK_RECOVERY
+    )
+    assert (
+        recovery.adapter_result.state
+        is AdapterExecutionState.UNKNOWN
+    )
+    assert recovery.adapter_result.result_id == "adapter_result-1"
+    assert recovery.adapter_result.references == (
+        "urn:cage:sdk:recovery-observation",
+    )
+    assert (
+        recovery.adapter_result.execution_attempt
+        is recovery.execution_attempt
+    )
+    assert (
+        recovery.execution_attempt
+        is not adapter.returned_result.execution_attempt
     )
 
     with pytest.raises(DuplicateExecutionError) as duplicate:

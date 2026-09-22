@@ -19,7 +19,10 @@ from cage.core.assurance import (
 from cage.core.attempt import Attempt
 from cage.core.capability import ExecutionCapability
 from cage.core.consequence import Consequence
-from cage.core.custody import execute_under_custody
+from cage.core.custody import (
+    AdapterResultMismatchError as CoreAdapterResultMismatchError,
+    execute_under_custody,
+)
 from cage.core.evaluation import (
     EvaluationRule,
     evaluate_attempt,
@@ -34,6 +37,7 @@ from cage.core.warrant import Warrant, create_decision_proof
 from cage.errors import (
     AdapterContractError,
     AdapterInvocationError,
+    AdapterResultMismatchError,
     CAGETypeError,
     CAGEValueError,
     DuplicateExecutionError,
@@ -449,6 +453,31 @@ class CAGE:
                 "adapter invocation failed after dispatch began",
                 execution=recovery_execution,
             ) from failure.error
+        except CoreAdapterResultMismatchError as error:
+            recovery_adapter_result = AdapterExecutionResult(
+                result_id=recovery_result_id,
+                execution_attempt=execution_attempt,
+                state=AdapterExecutionState.UNKNOWN,
+                references=(
+                    "urn:cage:sdk:recovery-observation",
+                ),
+            )
+            recovery_execution = ExecutionResult(
+                evaluation=evaluation,
+                capability=capability,
+                adapter_result=recovery_adapter_result,
+                observation_origin=(
+                    ExecutionObservationOrigin.SDK_RECOVERY
+                ),
+            )
+
+            with self._state_lock:
+                record.execution = recovery_execution
+
+            raise AdapterResultMismatchError(
+                "adapter result refers to a different execution attempt",
+                execution=recovery_execution,
+            ) from error
         except TypeError as error:
             with self._state_lock:
                 dispatched = record.dispatched

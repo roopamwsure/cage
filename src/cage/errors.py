@@ -1,5 +1,9 @@
 from typing import TYPE_CHECKING
 
+from cage.core.custody import (
+    AdapterResultMismatchError as CoreAdapterResultMismatchError,
+)
+
 if TYPE_CHECKING:
     from cage.core.execution import ExecutionAttempt
     from cage.identifiers import IdentityKind
@@ -47,6 +51,13 @@ class AdapterInvocationError(ExecutionError):
 
 class AdapterContractError(ExecutionError):
     """Raised when an adapter returns an invalid result after dispatch."""
+
+
+class AdapterResultMismatchError(
+    ExecutionError,
+    CoreAdapterResultMismatchError,
+):
+    """Raised when an adapter result refers to another execution."""
 
 
 class DuplicateExecutionError(CAGEError, RuntimeError):
