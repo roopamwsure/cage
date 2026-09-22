@@ -16,7 +16,8 @@ from cage.core.verification import (
     EffectVerificationResult,
     VerificationState,
 )
-from cage.identifiers import AssuranceIds
+from cage.errors import IdentifierGenerationError
+from cage.identifiers import AssuranceIds, IdentityKind
 from cage.results import ExecutionObservationOrigin
 
 
@@ -217,3 +218,170 @@ def test_verify_maps_verification_state_to_effect(
     assert assurance.effect.state is expected_effect_state
     assert assurance.effect.verification_refs == references
     assert assurance.execution is execution
+
+
+def test_verify_generates_assurance_identifiers() -> None:
+    counters: dict[IdentityKind, int] = {}
+    generated_kinds: list[IdentityKind] = []
+
+    def sequential_id(kind: IdentityKind) -> str:
+        generated_kinds.append(kind)
+        counters[kind] = counters.get(kind, 0) + 1
+        return f"{kind.value}-{counters[kind]}"
+
+    cage = CAGE(
+        rule=lambda *args: EvaluationOutcome(
+            state=DecisionState.ADMITTED
+        ),
+        config=CAGEConfig(id_factory=sequential_id),
+    )
+
+    action = cage.inputs.action(
+        action_type="database.delete",
+        principal_id="principal-1",
+        agent_id="agent-1",
+        resource_id="record-1",
+        requested_effect={"record_id": 1},
+    )
+    evaluation = cage.evaluate(
+        action=action,
+        idempotency_key="delete-account-generated-assurance-ids",
+    )
+    capability = ExecutionCapability(
+        capability_id="capability-1",
+        consequence_id=evaluation.consequence_id,
+        action_type="database.delete",
+        resource_id="record-1",
+    )
+    execution = cage.execute(
+        evaluation,
+        adapter=AcknowledgingAdapter(),
+        capability=capability,
+    )
+
+    generated_kinds.clear()
+
+    assurance = cage.verify(
+        execution,
+        verifier=BoundVerifier(),
+    )
+
+    assert generated_kinds == [
+        IdentityKind.EFFECT,
+        IdentityKind.EFFECT_PROOF,
+        IdentityKind.WARRANT,
+    ]
+    assert assurance.effect.effect_id == "effect-1"
+    assert assurance.effect_proof.proof_id == "effect_proof-1"
+    assert assurance.warrant.warrant_id == "warrant-2"
+
+
+def test_verify_explicit_ids_bypass_generation() -> None:
+    generated_kinds: list[IdentityKind] = []
+
+    def tracking_id(kind: IdentityKind) -> str:
+        generated_kinds.append(kind)
+        return f"{kind.value}-generated"
+
+    cage = CAGE(
+        rule=lambda *args: EvaluationOutcome(
+            state=DecisionState.ADMITTED
+        ),
+        config=CAGEConfig(id_factory=tracking_id),
+    )
+
+    action = cage.inputs.action(
+        action_type="database.delete",
+        principal_id="principal-1",
+        agent_id="agent-1",
+        resource_id="record-1",
+        requested_effect={"record_id": 1},
+    )
+    evaluation = cage.evaluate(
+        action=action,
+        idempotency_key="delete-account-explicit-assurance-ids",
+    )
+    capability = ExecutionCapability(
+        capability_id="capability-1",
+        consequence_id=evaluation.consequence_id,
+        action_type="database.delete",
+        resource_id="record-1",
+    )
+    execution = cage.execute(
+        evaluation,
+        adapter=AcknowledgingAdapter(),
+        capability=capability,
+    )
+
+    generated_kinds.clear()
+
+    assurance = cage.verify(
+        execution,
+        verifier=BoundVerifier(),
+        ids=AssuranceIds(
+            effect_id="effect-explicit",
+            effect_proof_id="effect-proof-explicit",
+            warrant_id="warrant-explicit",
+        ),
+    )
+
+    assert generated_kinds == []
+    assert assurance.effect.effect_id == "effect-explicit"
+    assert assurance.effect_proof.proof_id == (
+        "effect-proof-explicit"
+    )
+    assert assurance.warrant.warrant_id == "warrant-explicit"
+
+
+def test_verify_id_generation_failure_precedes_verifier() -> None:
+    def failing_id(kind: IdentityKind) -> str:
+        if kind is IdentityKind.EFFECT:
+            raise RuntimeError(
+                "effect ID generation failed"
+            )
+
+        return f"{kind.value}-generated"
+
+    cage = CAGE(
+        rule=lambda *args: EvaluationOutcome(
+            state=DecisionState.ADMITTED
+        ),
+        config=CAGEConfig(id_factory=failing_id),
+    )
+
+    action = cage.inputs.action(
+        action_type="database.delete",
+        principal_id="principal-1",
+        agent_id="agent-1",
+        resource_id="record-1",
+        requested_effect={"record_id": 1},
+    )
+    evaluation = cage.evaluate(
+        action=action,
+        idempotency_key="delete-account-assurance-id-failure",
+    )
+    capability = ExecutionCapability(
+        capability_id="capability-1",
+        consequence_id=evaluation.consequence_id,
+        action_type="database.delete",
+        resource_id="record-1",
+    )
+    execution = cage.execute(
+        evaluation,
+        adapter=AcknowledgingAdapter(),
+        capability=capability,
+    )
+    verifier = BoundVerifier()
+
+    with pytest.raises(IdentifierGenerationError) as captured:
+        cage.verify(
+            execution,
+            verifier=verifier,
+        )
+
+    assert captured.value.kind is IdentityKind.EFFECT
+    assert isinstance(captured.value.__cause__, RuntimeError)
+    assert str(captured.value.__cause__) == (
+        "effect ID generation failed"
+    )
+    assert verifier.calls == []
