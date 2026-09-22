@@ -22,6 +22,8 @@ from cage.core.consequence import Consequence
 from cage.core.custody import (
     AdapterResultMismatchError as CoreAdapterResultMismatchError,
     execute_under_custody,
+    select_effect_for_custody,
+    validate_capability_for_custody,
 )
 from cage.core.evaluation import (
     EvaluationRule,
@@ -411,6 +413,19 @@ class CAGE:
             decision=evaluation.decision,
         )
 
+        select_effect_for_custody(evaluation.decision)
+        validate_capability_for_custody(
+            decision=evaluation.decision,
+            capability=capability,
+        )
+
+        recovery_execution = _create_sdk_recovery_execution(
+            evaluation=evaluation,
+            capability=capability,
+            execution_attempt=execution_attempt,
+            result_id=recovery_result_id,
+        )
+
         with self._state_lock:
             canonical_consequence = (
                 self._idempotency_registry.resolve(
@@ -452,13 +467,6 @@ class CAGE:
                 adapter=tracking_adapter,
             )
         except _AdapterCallbackFailure as failure:
-            recovery_execution = _create_sdk_recovery_execution(
-                evaluation=evaluation,
-                capability=capability,
-                execution_attempt=execution_attempt,
-                result_id=recovery_result_id,
-            )
-
             with self._state_lock:
                 record.execution = recovery_execution
 
@@ -467,13 +475,6 @@ class CAGE:
                 execution=recovery_execution,
             ) from failure.error
         except CoreAdapterResultMismatchError as error:
-            recovery_execution = _create_sdk_recovery_execution(
-                evaluation=evaluation,
-                capability=capability,
-                execution_attempt=execution_attempt,
-                result_id=recovery_result_id,
-            )
-
             with self._state_lock:
                 record.execution = recovery_execution
 
@@ -487,13 +488,6 @@ class CAGE:
 
             if not dispatched:
                 raise
-
-            recovery_execution = _create_sdk_recovery_execution(
-                evaluation=evaluation,
-                capability=capability,
-                execution_attempt=execution_attempt,
-                result_id=recovery_result_id,
-            )
 
             with self._state_lock:
                 record.execution = recovery_execution
@@ -515,13 +509,6 @@ class CAGE:
                         del self._dispatch_records[consequence_id]
 
             if dispatched:
-                recovery_execution = _create_sdk_recovery_execution(
-                    evaluation=evaluation,
-                    capability=capability,
-                    execution_attempt=execution_attempt,
-                    result_id=recovery_result_id,
-                )
-
                 with self._state_lock:
                     record.execution = recovery_execution
 
@@ -537,13 +524,6 @@ class CAGE:
                 ),
             )
         except BaseException:
-            recovery_execution = _create_sdk_recovery_execution(
-                evaluation=evaluation,
-                capability=capability,
-                execution_attempt=execution_attempt,
-                result_id=recovery_result_id,
-            )
-
             with self._state_lock:
                 record.execution = recovery_execution
 

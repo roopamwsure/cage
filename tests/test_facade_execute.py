@@ -1188,16 +1188,20 @@ def test_execute_result_assembly_failure_finalizes_recovery(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     real_execution_result = facade_module.ExecutionResult
-    assembly_calls = 0
+    fail_adapter_assembly = True
 
     def fail_first_assembly(
         *args: object,
         **kwargs: object,
     ) -> ExecutionResult:
-        nonlocal assembly_calls
-        assembly_calls += 1
+        nonlocal fail_adapter_assembly
 
-        if assembly_calls == 1:
+        if (
+            kwargs.get("observation_origin")
+            is ExecutionObservationOrigin.ADAPTER
+            and fail_adapter_assembly
+        ):
+            fail_adapter_assembly = False
             raise RuntimeError(
                 "execution result assembly failed"
             )
@@ -1271,3 +1275,103 @@ def test_execute_result_assembly_failure_finalizes_recovery(
         duplicate.value.execution_attempt
         is recovery.execution_attempt
     )
+
+
+def test_execute_recovery_assembly_failure_occurs_before_dispatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    real_execution_result = facade_module.ExecutionResult
+    fail_recovery_assembly = True
+
+    def controlled_execution_result(
+        *args: object,
+        **kwargs: object,
+    ) -> ExecutionResult:
+        nonlocal fail_recovery_assembly
+
+        if (
+            kwargs.get("observation_origin")
+            is ExecutionObservationOrigin.SDK_RECOVERY
+            and fail_recovery_assembly
+        ):
+            fail_recovery_assembly = False
+            raise RuntimeError(
+                "recovery result assembly failed"
+            )
+
+        return real_execution_result(*args, **kwargs)
+
+    monkeypatch.setattr(
+        facade_module,
+        "ExecutionResult",
+        controlled_execution_result,
+    )
+
+    cage = CAGE(
+        rule=lambda *args: EvaluationOutcome(
+            state=DecisionState.ADMITTED
+        )
+    )
+
+    action = cage.inputs.action(
+        action_type="database.delete",
+        principal_id="principal-1",
+        agent_id="agent-1",
+        resource_id="record-1",
+        requested_effect={"record_id": 1},
+    )
+    evaluation = cage.evaluate(
+        action=action,
+        idempotency_key="delete-account-recovery-assembly-failure",
+    )
+    capability = ExecutionCapability(
+        capability_id="capability-1",
+        consequence_id=evaluation.consequence_id,
+        action_type="database.delete",
+        resource_id="record-1",
+    )
+    adapter = RaisingAdapter(
+        RuntimeError("adapter failed")
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="recovery result assembly failed",
+    ):
+        cage.execute(
+            evaluation,
+            adapter=adapter,
+            capability=capability,
+        )
+
+    assert adapter.calls == 0
+
+    with pytest.raises(AdapterInvocationError) as captured:
+        cage.execute(
+            evaluation,
+            adapter=adapter,
+            capability=capability,
+        )
+
+    assert adapter.calls == 1
+
+    recovery = captured.value.execution
+
+    assert (
+        recovery.observation_origin
+        is ExecutionObservationOrigin.SDK_RECOVERY
+    )
+    assert (
+        recovery.adapter_result.state
+        is AdapterExecutionState.UNKNOWN
+    )
+
+    with pytest.raises(DuplicateExecutionError) as duplicate:
+        cage.execute(
+            evaluation,
+            adapter=adapter,
+            capability=capability,
+        )
+
+    assert adapter.calls == 1
+    assert duplicate.value.execution is recovery
