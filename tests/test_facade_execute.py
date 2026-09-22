@@ -23,6 +23,7 @@ from cage.errors import (
 )
 from cage.identifiers import EvaluationIds, IdentityKind
 from cage.results import (
+    EvaluationResult,
     ExecutionObservationOrigin,
     ExecutionResult,
 )
@@ -91,6 +92,7 @@ class InvalidReturnAdapter:
         self.calls += 1
         return None  # type: ignore[return-value]
 
+
 class MismatchedResultAdapter:
     def __init__(self) -> None:
         self.calls = 0
@@ -117,6 +119,51 @@ class MismatchedResultAdapter:
         )
         self.returned_result = result
         return result
+
+
+class ReentrantAdapter:
+    def __init__(
+        self,
+        *,
+        cage: CAGE,
+        evaluation: EvaluationResult,
+        capability: ExecutionCapability,
+    ) -> None:
+        self.cage = cage
+        self.evaluation = evaluation
+        self.capability = capability
+        self.calls = 0
+        self.reentrant_error: DuplicateExecutionError | None = None
+
+    def execute(
+        self,
+        *,
+        execution_attempt: ExecutionAttempt,
+        effect: RequestedEffect,
+        capability: ExecutionCapability,
+    ) -> AdapterExecutionResult:
+        self.calls += 1
+
+        try:
+            self.cage.execute(
+                self.evaluation,
+                adapter=self,
+                capability=self.capability,
+            )
+        except DuplicateExecutionError as error:
+            self.reentrant_error = error
+        else:
+            raise AssertionError(
+                "re-entrant execution must be rejected"
+            )
+
+        return AdapterExecutionResult(
+            result_id="adapter-result-reentrant",
+            execution_attempt=execution_attempt,
+            state=AdapterExecutionState.ACKNOWLEDGED,
+            references=("provider-receipt-reentrant",),
+        )
+
 
 def test_execute_dispatches_admitted_evaluation_under_custody() -> None:
     def deterministic_id(kind: IdentityKind) -> str:
@@ -601,6 +648,7 @@ def test_execute_invalid_adapter_return_retains_recovery_context() -> None:
     )
     assert duplicate.value.execution is recovery
 
+
 def test_execute_mismatched_adapter_result_retains_recovery_context() -> None:
     counters: dict[IdentityKind, int] = {}
 
@@ -650,10 +698,7 @@ def test_execute_mismatched_adapter_result_retains_recovery_context() -> None:
 
     assert adapter.calls == 1
     assert adapter.returned_result is not None
-    assert (
-        adapter.returned_result.result_id
-        == "adapter-result-mismatched"
-    )
+    assert adapter.returned_result.result_id == "adapter-result-mismatched"
     assert (
         adapter.returned_result.execution_attempt.execution_attempt_id
         == "execution-attempt-wrong"
@@ -690,8 +735,73 @@ def test_execute_mismatched_adapter_result_retains_recovery_context() -> None:
         )
 
     assert adapter.calls == 1
-    assert (
-        duplicate.value.execution_attempt
-        is recovery.execution_attempt
-    )
+    assert duplicate.value.execution_attempt is recovery.execution_attempt
     assert duplicate.value.execution is recovery
+
+
+def test_execute_reentrant_call_is_rejected_without_redispatch() -> None:
+    cage = CAGE(
+        rule=lambda *args: EvaluationOutcome(
+            state=DecisionState.ADMITTED
+        )
+    )
+
+    action = cage.inputs.action(
+        action_type="database.delete",
+        principal_id="principal-1",
+        agent_id="agent-1",
+        resource_id="record-1",
+        requested_effect={"record_id": 1},
+    )
+    evaluation = cage.evaluate(
+        action=action,
+        idempotency_key="delete-account-reentrant",
+    )
+    capability = ExecutionCapability(
+        capability_id="capability-1",
+        consequence_id=evaluation.consequence_id,
+        action_type="database.delete",
+        resource_id="record-1",
+    )
+    adapter = ReentrantAdapter(
+        cage=cage,
+        evaluation=evaluation,
+        capability=capability,
+    )
+
+    result = cage.execute(
+        evaluation,
+        adapter=adapter,
+        capability=capability,
+    )
+
+    assert adapter.calls == 1
+    assert adapter.reentrant_error is not None
+    assert (
+        adapter.reentrant_error.execution_attempt
+        is result.execution_attempt
+    )
+    assert (
+        adapter.reentrant_error.consequence_id
+        == evaluation.consequence_id
+    )
+    assert adapter.reentrant_error.execution is None
+
+    assert result.adapter_result.result_id == (
+        "adapter-result-reentrant"
+    )
+    assert (
+        result.observation_origin
+        is ExecutionObservationOrigin.ADAPTER
+    )
+
+    with pytest.raises(DuplicateExecutionError) as duplicate:
+        cage.execute(
+            evaluation,
+            adapter=adapter,
+            capability=capability,
+        )
+
+    assert adapter.calls == 1
+    assert duplicate.value.execution_attempt is result.execution_attempt
+    assert duplicate.value.execution is result
