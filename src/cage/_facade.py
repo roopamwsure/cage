@@ -35,7 +35,16 @@ from cage.core.idempotency import (
     IdempotencyRegistry,
 )
 from cage.core.replay import create_replay_attempt
-from cage.core.warrant import Warrant, create_decision_proof
+from cage.core.verification import (
+    EffectVerifier,
+    create_effect_from_verification,
+    reconcile_effect_verification,
+)
+from cage.core.warrant import (
+    Warrant,
+    create_decision_proof,
+    create_effect_proof,
+)
 from cage.errors import (
     AdapterContractError,
     AdapterInvocationError,
@@ -45,12 +54,14 @@ from cage.errors import (
     DuplicateExecutionError,
 )
 from cage.identifiers import (
+    AssuranceIds,
     EvaluationIds,
     IdentityKind,
     _generate_id,
 )
 from cage.inputs import CAGEInputs
 from cage.results import (
+    AssuranceResult,
     EvaluationResult,
     ExecutionObservationOrigin,
     ExecutionResult,
@@ -533,3 +544,74 @@ class CAGE:
             record.execution = execution
 
         return execution
+
+    def verify(
+        self,
+        execution: ExecutionResult,
+        *,
+        verifier: EffectVerifier,
+        ids: AssuranceIds | None = None,
+    ) -> AssuranceResult:
+        if not isinstance(execution, ExecutionResult):
+            raise CAGETypeError(
+                "execution must be an ExecutionResult"
+            )
+
+        if ids is None:
+            resolved_ids = AssuranceIds()
+        elif not isinstance(ids, AssuranceIds):
+            raise CAGETypeError(
+                "ids must be an AssuranceIds or None"
+            )
+        else:
+            resolved_ids = ids
+
+        effect_id = (
+            resolved_ids.effect_id
+            or _generate_id(
+                self._config.id_factory,
+                IdentityKind.EFFECT,
+            )
+        )
+        effect_proof_id = (
+            resolved_ids.effect_proof_id
+            or _generate_id(
+                self._config.id_factory,
+                IdentityKind.EFFECT_PROOF,
+            )
+        )
+        warrant_id = (
+            resolved_ids.warrant_id
+            or _generate_id(
+                self._config.id_factory,
+                IdentityKind.WARRANT,
+            )
+        )
+
+        verification = reconcile_effect_verification(
+            adapter_result=execution.adapter_result,
+            verifier=verifier,
+        )
+        effect = create_effect_from_verification(
+            effect_id=effect_id,
+            verification=verification,
+        )
+        effect_proof = create_effect_proof(
+            proof_id=effect_proof_id,
+            effect=effect,
+            verification=verification,
+        )
+        warrant = Warrant(
+            warrant_id=warrant_id,
+            schema_version="0.7",
+            decision_proof=execution.decision_proof,
+            effect_proof=effect_proof,
+            previous_warrant_id=(
+                execution.evaluation.warrant.warrant_id
+            ),
+        )
+
+        return AssuranceResult(
+            execution=execution,
+            warrant=warrant,
+        )
