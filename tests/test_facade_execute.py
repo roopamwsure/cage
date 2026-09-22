@@ -947,3 +947,86 @@ def test_execute_concurrent_calls_allow_only_one_dispatch() -> None:
         is first_result.execution_attempt
     )
     assert later_duplicate.value.execution is first_result
+
+
+def test_execute_dispatch_state_is_isolated_between_instances() -> None:
+    shared_config = CAGEConfig()
+
+    def admit(*args: object) -> EvaluationOutcome:
+        return EvaluationOutcome(
+            state=DecisionState.ADMITTED
+        )
+
+    first_cage = CAGE(
+        rule=admit,
+        config=shared_config,
+    )
+    second_cage = CAGE(
+        rule=admit,
+        config=shared_config,
+    )
+
+    action = first_cage.inputs.action(
+        action_type="database.delete",
+        principal_id="principal-1",
+        agent_id="agent-1",
+        resource_id="record-1",
+        requested_effect={"record_id": 1},
+    )
+    evaluation = first_cage.evaluate(
+        action=action,
+        idempotency_key="delete-account-instance-isolation",
+    )
+    capability = ExecutionCapability(
+        capability_id="capability-1",
+        consequence_id=evaluation.consequence_id,
+        action_type="database.delete",
+        resource_id="record-1",
+    )
+    first_adapter = RecordingAdapter()
+    second_adapter = RecordingAdapter()
+
+    first_result = first_cage.execute(
+        evaluation,
+        adapter=first_adapter,
+        capability=capability,
+    )
+    second_result = second_cage.execute(
+        evaluation,
+        adapter=second_adapter,
+        capability=capability,
+    )
+
+    assert first_cage.config is shared_config
+    assert second_cage.config is shared_config
+
+    assert len(first_adapter.calls) == 1
+    assert len(second_adapter.calls) == 1
+    assert (
+        first_result.execution_attempt
+        is not second_result.execution_attempt
+    )
+    assert (
+        first_result.consequence_id
+        == second_result.consequence_id
+        == evaluation.consequence_id
+    )
+
+    with pytest.raises(DuplicateExecutionError) as first_duplicate:
+        first_cage.execute(
+            evaluation,
+            adapter=first_adapter,
+            capability=capability,
+        )
+
+    with pytest.raises(DuplicateExecutionError) as second_duplicate:
+        second_cage.execute(
+            evaluation,
+            adapter=second_adapter,
+            capability=capability,
+        )
+
+    assert len(first_adapter.calls) == 1
+    assert len(second_adapter.calls) == 1
+    assert first_duplicate.value.execution is first_result
+    assert second_duplicate.value.execution is second_result
