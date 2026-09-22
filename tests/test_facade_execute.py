@@ -1,3 +1,5 @@
+from threading import Event, Thread
+
 import pytest
 
 from cage._facade import CAGE
@@ -162,6 +164,35 @@ class ReentrantAdapter:
             execution_attempt=execution_attempt,
             state=AdapterExecutionState.ACKNOWLEDGED,
             references=("provider-receipt-reentrant",),
+        )
+
+
+class BlockingAdapter:
+    def __init__(self) -> None:
+        self.calls = 0
+        self.entered = Event()
+        self.release = Event()
+
+    def execute(
+        self,
+        *,
+        execution_attempt: ExecutionAttempt,
+        effect: RequestedEffect,
+        capability: ExecutionCapability,
+    ) -> AdapterExecutionResult:
+        self.calls += 1
+        self.entered.set()
+
+        if not self.release.wait(timeout=5):
+            raise RuntimeError(
+                "test timed out waiting to release adapter"
+            )
+
+        return AdapterExecutionResult(
+            result_id="adapter-result-concurrent",
+            execution_attempt=execution_attempt,
+            state=AdapterExecutionState.ACKNOWLEDGED,
+            references=("provider-receipt-concurrent",),
         )
 
 
@@ -805,3 +836,114 @@ def test_execute_reentrant_call_is_rejected_without_redispatch() -> None:
     assert adapter.calls == 1
     assert duplicate.value.execution_attempt is result.execution_attempt
     assert duplicate.value.execution is result
+
+
+def test_execute_concurrent_calls_allow_only_one_dispatch() -> None:
+    cage = CAGE(
+        rule=lambda *args: EvaluationOutcome(
+            state=DecisionState.ADMITTED
+        )
+    )
+
+    action = cage.inputs.action(
+        action_type="database.delete",
+        principal_id="principal-1",
+        agent_id="agent-1",
+        resource_id="record-1",
+        requested_effect={"record_id": 1},
+    )
+    evaluation = cage.evaluate(
+        action=action,
+        idempotency_key="delete-account-concurrent",
+    )
+    capability = ExecutionCapability(
+        capability_id="capability-1",
+        consequence_id=evaluation.consequence_id,
+        action_type="database.delete",
+        resource_id="record-1",
+    )
+    adapter = BlockingAdapter()
+
+    first_results: list[ExecutionResult] = []
+    first_errors: list[BaseException] = []
+    second_errors: list[BaseException] = []
+
+    def first_call() -> None:
+        try:
+            first_results.append(
+                cage.execute(
+                    evaluation,
+                    adapter=adapter,
+                    capability=capability,
+                )
+            )
+        except BaseException as error:
+            first_errors.append(error)
+
+    def second_call() -> None:
+        try:
+            cage.execute(
+                evaluation,
+                adapter=adapter,
+                capability=capability,
+            )
+        except BaseException as error:
+            second_errors.append(error)
+
+    first_thread = Thread(target=first_call)
+    second_thread = Thread(target=second_call)
+
+    first_thread.start()
+
+    assert adapter.entered.wait(timeout=5)
+
+    second_thread.start()
+    second_thread.join(timeout=5)
+
+    try:
+        assert not second_thread.is_alive()
+        assert len(second_errors) == 1
+        assert isinstance(
+            second_errors[0],
+            DuplicateExecutionError,
+        )
+    finally:
+        adapter.release.set()
+
+    first_thread.join(timeout=5)
+
+    assert not first_thread.is_alive()
+    assert first_errors == []
+    assert len(first_results) == 1
+    assert adapter.calls == 1
+
+    first_result = first_results[0]
+    duplicate_error = second_errors[0]
+
+    assert isinstance(
+        duplicate_error,
+        DuplicateExecutionError,
+    )
+    assert (
+        duplicate_error.execution_attempt
+        is first_result.execution_attempt
+    )
+    assert (
+        duplicate_error.consequence_id
+        == evaluation.consequence_id
+    )
+    assert duplicate_error.execution is None
+
+    with pytest.raises(DuplicateExecutionError) as later_duplicate:
+        cage.execute(
+            evaluation,
+            adapter=adapter,
+            capability=capability,
+        )
+
+    assert adapter.calls == 1
+    assert (
+        later_duplicate.value.execution_attempt
+        is first_result.execution_attempt
+    )
+    assert later_duplicate.value.execution is first_result
