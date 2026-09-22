@@ -22,6 +22,7 @@ from cage.errors import (
     AdapterInvocationError,
     DuplicateExecutionError,
     ExecutionError,
+    IdentifierGenerationError,
 )
 from cage.identifiers import EvaluationIds, IdentityKind
 from cage.results import (
@@ -1030,3 +1031,81 @@ def test_execute_dispatch_state_is_isolated_between_instances() -> None:
     assert len(second_adapter.calls) == 1
     assert first_duplicate.value.execution is first_result
     assert second_duplicate.value.execution is second_result
+
+
+def test_execute_id_factory_failure_does_not_reserve_dispatch() -> None:
+    counters: dict[IdentityKind, int] = {}
+    fail_execution_attempt = True
+
+    def id_factory(kind: IdentityKind) -> str:
+        nonlocal fail_execution_attempt
+
+        if (
+            kind is IdentityKind.EXECUTION_ATTEMPT
+            and fail_execution_attempt
+        ):
+            fail_execution_attempt = False
+            raise RuntimeError(
+                "execution attempt ID generation failed"
+            )
+
+        counters[kind] = counters.get(kind, 0) + 1
+        return f"{kind.value}-{counters[kind]}"
+
+    cage = CAGE(
+        rule=lambda *args: EvaluationOutcome(
+            state=DecisionState.ADMITTED
+        ),
+        config=CAGEConfig(id_factory=id_factory),
+    )
+
+    action = cage.inputs.action(
+        action_type="database.delete",
+        principal_id="principal-1",
+        agent_id="agent-1",
+        resource_id="record-1",
+        requested_effect={"record_id": 1},
+    )
+    evaluation = cage.evaluate(
+        action=action,
+        idempotency_key="delete-account-id-factory-failure",
+    )
+    capability = ExecutionCapability(
+        capability_id="capability-1",
+        consequence_id=evaluation.consequence_id,
+        action_type="database.delete",
+        resource_id="record-1",
+    )
+    adapter = RecordingAdapter()
+
+    with pytest.raises(IdentifierGenerationError) as captured:
+        cage.execute(
+            evaluation,
+            adapter=adapter,
+            capability=capability,
+        )
+
+    assert captured.value.kind is IdentityKind.EXECUTION_ATTEMPT
+    assert isinstance(captured.value.__cause__, RuntimeError)
+    assert str(captured.value.__cause__) == (
+        "execution attempt ID generation failed"
+    )
+
+    assert adapter.calls == []
+
+    result = cage.execute(
+        evaluation,
+        adapter=adapter,
+        capability=capability,
+    )
+
+    assert len(adapter.calls) == 1
+    assert result.consequence_id == evaluation.consequence_id
+    assert (
+        result.execution_attempt.execution_attempt_id
+        == "execution_attempt-1"
+    )
+    assert (
+        result.observation_origin
+        is ExecutionObservationOrigin.ADAPTER
+    )
