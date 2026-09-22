@@ -2,6 +2,7 @@ from threading import Event, Thread
 
 import pytest
 
+import cage._facade as facade_module
 from cage._facade import CAGE
 from cage.config import CAGEConfig
 from cage.core.action import RequestedEffect
@@ -1165,6 +1166,95 @@ def test_execute_interruption_finalizes_recovery_before_reraise(
         )
 
     assert adapter.calls == 1
+    assert duplicate.value.execution is not None
+
+    recovery = duplicate.value.execution
+
+    assert (
+        recovery.observation_origin
+        is ExecutionObservationOrigin.SDK_RECOVERY
+    )
+    assert (
+        recovery.adapter_result.state
+        is AdapterExecutionState.UNKNOWN
+    )
+    assert (
+        duplicate.value.execution_attempt
+        is recovery.execution_attempt
+    )
+
+
+def test_execute_result_assembly_failure_finalizes_recovery(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    real_execution_result = facade_module.ExecutionResult
+    assembly_calls = 0
+
+    def fail_first_assembly(
+        *args: object,
+        **kwargs: object,
+    ) -> ExecutionResult:
+        nonlocal assembly_calls
+        assembly_calls += 1
+
+        if assembly_calls == 1:
+            raise RuntimeError(
+                "execution result assembly failed"
+            )
+
+        return real_execution_result(*args, **kwargs)
+
+    monkeypatch.setattr(
+        facade_module,
+        "ExecutionResult",
+        fail_first_assembly,
+    )
+
+    cage = CAGE(
+        rule=lambda *args: EvaluationOutcome(
+            state=DecisionState.ADMITTED
+        )
+    )
+
+    action = cage.inputs.action(
+        action_type="database.delete",
+        principal_id="principal-1",
+        agent_id="agent-1",
+        resource_id="record-1",
+        requested_effect={"record_id": 1},
+    )
+    evaluation = cage.evaluate(
+        action=action,
+        idempotency_key="delete-account-result-assembly-failure",
+    )
+    capability = ExecutionCapability(
+        capability_id="capability-1",
+        consequence_id=evaluation.consequence_id,
+        action_type="database.delete",
+        resource_id="record-1",
+    )
+    adapter = RecordingAdapter()
+
+    with pytest.raises(
+        RuntimeError,
+        match="execution result assembly failed",
+    ):
+        cage.execute(
+            evaluation,
+            adapter=adapter,
+            capability=capability,
+        )
+
+    assert len(adapter.calls) == 1
+
+    with pytest.raises(DuplicateExecutionError) as duplicate:
+        cage.execute(
+            evaluation,
+            adapter=adapter,
+            capability=capability,
+        )
+
+    assert len(adapter.calls) == 1
     assert duplicate.value.execution is not None
 
     recovery = duplicate.value.execution

@@ -527,12 +527,27 @@ class CAGE:
 
             raise
 
-        execution = ExecutionResult(
-            evaluation=evaluation,
-            capability=capability,
-            adapter_result=adapter_result,
-            observation_origin=ExecutionObservationOrigin.ADAPTER,
-        )
+        try:
+            execution = ExecutionResult(
+                evaluation=evaluation,
+                capability=capability,
+                adapter_result=adapter_result,
+                observation_origin=(
+                    ExecutionObservationOrigin.ADAPTER
+                ),
+            )
+        except BaseException:
+            recovery_execution = _create_sdk_recovery_execution(
+                evaluation=evaluation,
+                capability=capability,
+                execution_attempt=execution_attempt,
+                result_id=recovery_result_id,
+            )
+
+            with self._state_lock:
+                record.execution = recovery_execution
+
+            raise
 
         with self._state_lock:
             record.execution = execution
