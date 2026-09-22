@@ -97,6 +97,29 @@ class _DispatchTrackingAdapter:
             raise _AdapterCallbackFailure(error) from error
 
 
+def _create_sdk_recovery_execution(
+    *,
+    evaluation: EvaluationResult,
+    capability: ExecutionCapability,
+    execution_attempt: ExecutionAttempt,
+    result_id: str,
+) -> ExecutionResult:
+    recovery_adapter_result = AdapterExecutionResult(
+        result_id=result_id,
+        execution_attempt=execution_attempt,
+        state=AdapterExecutionState.UNKNOWN,
+        references=(
+            "urn:cage:sdk:recovery-observation",
+        ),
+    )
+    return ExecutionResult(
+        evaluation=evaluation,
+        capability=capability,
+        adapter_result=recovery_adapter_result,
+        observation_origin=ExecutionObservationOrigin.SDK_RECOVERY,
+    )
+
+
 def _validate_replay_ids(
     *,
     previous: EvaluationResult,
@@ -429,21 +452,11 @@ class CAGE:
                 adapter=tracking_adapter,
             )
         except _AdapterCallbackFailure as failure:
-            recovery_adapter_result = AdapterExecutionResult(
-                result_id=recovery_result_id,
-                execution_attempt=execution_attempt,
-                state=AdapterExecutionState.UNKNOWN,
-                references=(
-                    "urn:cage:sdk:recovery-observation",
-                ),
-            )
-            recovery_execution = ExecutionResult(
+            recovery_execution = _create_sdk_recovery_execution(
                 evaluation=evaluation,
                 capability=capability,
-                adapter_result=recovery_adapter_result,
-                observation_origin=(
-                    ExecutionObservationOrigin.SDK_RECOVERY
-                ),
+                execution_attempt=execution_attempt,
+                result_id=recovery_result_id,
             )
 
             with self._state_lock:
@@ -454,21 +467,11 @@ class CAGE:
                 execution=recovery_execution,
             ) from failure.error
         except CoreAdapterResultMismatchError as error:
-            recovery_adapter_result = AdapterExecutionResult(
-                result_id=recovery_result_id,
-                execution_attempt=execution_attempt,
-                state=AdapterExecutionState.UNKNOWN,
-                references=(
-                    "urn:cage:sdk:recovery-observation",
-                ),
-            )
-            recovery_execution = ExecutionResult(
+            recovery_execution = _create_sdk_recovery_execution(
                 evaluation=evaluation,
                 capability=capability,
-                adapter_result=recovery_adapter_result,
-                observation_origin=(
-                    ExecutionObservationOrigin.SDK_RECOVERY
-                ),
+                execution_attempt=execution_attempt,
+                result_id=recovery_result_id,
             )
 
             with self._state_lock:
@@ -485,21 +488,11 @@ class CAGE:
             if not dispatched:
                 raise
 
-            recovery_adapter_result = AdapterExecutionResult(
-                result_id=recovery_result_id,
-                execution_attempt=execution_attempt,
-                state=AdapterExecutionState.UNKNOWN,
-                references=(
-                    "urn:cage:sdk:recovery-observation",
-                ),
-            )
-            recovery_execution = ExecutionResult(
+            recovery_execution = _create_sdk_recovery_execution(
                 evaluation=evaluation,
                 capability=capability,
-                adapter_result=recovery_adapter_result,
-                observation_origin=(
-                    ExecutionObservationOrigin.SDK_RECOVERY
-                ),
+                execution_attempt=execution_attempt,
+                result_id=recovery_result_id,
             )
 
             with self._state_lock:
