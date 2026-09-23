@@ -1,0 +1,93 @@
+name: CI
+
+on:
+  push:
+    branches: [main, feat/v0.7-developer-product]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11', '3.12', '3.13', '3.14']
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install source package and test dependencies
+        run: python -m pip install -e '.[dev]'
+      - name: Run tests
+        run: python -m pytest -q
+      - name: Run local examples
+        run: |
+          python examples/sqlite_delete.py
+          python examples/sqlite_reconcile.py
+
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+      - name: Install build frontend
+        run: python -m pip install build
+      - name: Build wheel and source archive
+        run: python -m build
+      - name: Inspect distribution contents
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import tarfile
+          import zipfile
+
+          expected = (
+              'examples/sqlite_delete.py',
+              'examples/sqlite_reconcile.py',
+              'docs/quickstart.md',
+              'docs/reconciliation-walkthrough.md',
+          )
+          distributions = tuple(Path('dist').glob('cage_assurance-*'))
+          assert len(distributions) == 2, distributions
+          for distribution in distributions:
+              if distribution.suffix == '.whl':
+                  with zipfile.ZipFile(distribution) as archive:
+                      names = archive.namelist()
+              else:
+                  with tarfile.open(distribution) as archive:
+                      names = archive.getnames()
+              for path in expected:
+                  assert any(name.endswith(path) for name in names), (distribution, path)
+          PY
+      - name: Install and run wheel outside source checkout
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import subprocess
+          import tempfile
+          from venv import EnvBuilder
+
+          wheel = next(Path('dist').glob('*.whl')).resolve()
+          environment = Path(tempfile.mkdtemp(prefix='cage-ci-install-'))
+          EnvBuilder(with_pip=True).create(environment)
+          python = environment / 'bin' / 'python'
+          subprocess.run(
+              [str(python), '-m', 'pip', 'install', '--no-deps', str(wheel)],
+              check=True,
+          )
+          subprocess.run(
+              [str(python), '-c', 'from cage import CAGE; print(CAGE.__name__)'],
+              cwd=environment,
+              check=True,
+          )
+          for name in ('sqlite_delete.py', 'sqlite_reconcile.py'):
+              script = environment / 'share' / 'cage-assurance' / 'examples' / name
+              assert script.is_file(), script
+              subprocess.run([str(python), str(script)], cwd=environment, check=True)
+          PY
