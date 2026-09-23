@@ -16,7 +16,7 @@ from cage.core.verification import (
     EffectVerificationResult,
     VerificationState,
 )
-from cage.errors import IdentifierGenerationError
+from cage.errors import CAGETypeError, IdentifierGenerationError
 from cage.identifiers import AssuranceIds, IdentityKind
 from cage.results import ExecutionObservationOrigin
 
@@ -385,3 +385,47 @@ def test_verify_id_generation_failure_precedes_verifier() -> None:
         "effect ID generation failed"
     )
     assert verifier.calls == []
+
+def test_verify_rejects_invalid_verifier() -> None:
+    cage = CAGE(
+        rule=lambda *args: EvaluationOutcome(
+            state=DecisionState.ADMITTED
+        )
+    )
+
+    action = cage.inputs.action(
+        action_type="database.delete",
+        principal_id="principal-1",
+        agent_id="agent-1",
+        resource_id="record-1",
+        requested_effect={"record_id": 1},
+    )
+    evaluation = cage.evaluate(
+        action=action,
+        idempotency_key="delete-account-invalid-verifier",
+    )
+    capability = ExecutionCapability(
+        capability_id="capability-1",
+        consequence_id=evaluation.consequence_id,
+        action_type="database.delete",
+        resource_id="record-1",
+    )
+    execution = cage.execute(
+        evaluation,
+        adapter=AcknowledgingAdapter(),
+        capability=capability,
+    )
+
+    with pytest.raises(
+        CAGETypeError,
+        match="verifier must satisfy EffectVerifier",
+    ):
+        cage.verify(
+            execution,
+            verifier=object(),  # type: ignore[arg-type]
+            ids=AssuranceIds(
+                effect_id="effect-1",
+                effect_proof_id="effect-proof-1",
+                warrant_id="warrant-1",
+            ),
+        )

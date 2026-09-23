@@ -557,6 +557,11 @@ class CAGE:
                 "execution must be an ExecutionResult"
             )
 
+        if not isinstance(verifier, EffectVerifier):
+            raise CAGETypeError(
+                "verifier must satisfy EffectVerifier"
+            )
+
         if ids is None:
             resolved_ids = AssuranceIds()
         elif not isinstance(ids, AssuranceIds):
