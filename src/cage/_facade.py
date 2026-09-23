@@ -53,6 +53,7 @@ from cage.errors import (
     CAGETypeError,
     CAGEValueError,
     DuplicateExecutionError,
+    VerifierContractError,
     VerifierInvocationError,
 )
 from cage.identifiers import (
@@ -636,6 +637,11 @@ class CAGE:
                 "effect verifier invocation failed",
                 execution=execution,
             ) from failure.error
+        except TypeError as error:
+            raise VerifierContractError(
+                "effect verifier returned an invalid result",
+                execution=execution,
+            ) from error
 
         effect = create_effect_from_verification(
             effect_id=effect_id,

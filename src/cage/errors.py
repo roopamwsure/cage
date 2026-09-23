@@ -63,6 +63,10 @@ class VerifierInvocationError(ExecutionError):
     """Raised when an effect verifier callback fails."""
 
 
+class VerifierContractError(ExecutionError):
+    """Raised when an effect verifier returns an invalid result."""
+
+
 class DuplicateExecutionError(CAGEError, RuntimeError):
     """Raised when a Consequence is already reserved for execution."""
 

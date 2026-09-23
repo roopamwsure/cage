@@ -19,6 +19,7 @@ from cage.core.verification import (
 from cage.errors import (
     CAGETypeError,
     IdentifierGenerationError,
+    VerifierContractError,
     VerifierInvocationError,
 )
 from cage.identifiers import AssuranceIds, IdentityKind
@@ -497,4 +498,71 @@ def test_verify_wraps_verifier_invocation_failure() -> None:
     assert captured.value.__cause__ is verifier.error
     assert str(captured.value) == (
         "effect verifier invocation failed"
+    )
+
+
+def test_verify_wraps_invalid_verifier_return() -> None:
+    class InvalidReturnVerifier:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def verify(
+            self,
+            *,
+            adapter_result: AdapterExecutionResult,
+        ) -> EffectVerificationResult:
+            self.calls += 1
+            return None  # type: ignore[return-value]
+
+    cage = CAGE(
+        rule=lambda *args: EvaluationOutcome(
+            state=DecisionState.ADMITTED
+        )
+    )
+
+    action = cage.inputs.action(
+        action_type="database.delete",
+        principal_id="principal-1",
+        agent_id="agent-1",
+        resource_id="record-1",
+        requested_effect={"record_id": 1},
+    )
+    evaluation = cage.evaluate(
+        action=action,
+        idempotency_key="delete-account-invalid-verifier-return",
+    )
+    capability = ExecutionCapability(
+        capability_id="capability-1",
+        consequence_id=evaluation.consequence_id,
+        action_type="database.delete",
+        resource_id="record-1",
+    )
+    execution = cage.execute(
+        evaluation,
+        adapter=AcknowledgingAdapter(),
+        capability=capability,
+    )
+    verifier = InvalidReturnVerifier()
+
+    with pytest.raises(VerifierContractError) as captured:
+        cage.verify(
+            execution,
+            verifier=verifier,
+            ids=AssuranceIds(
+                effect_id="effect-invalid-verifier-return",
+                effect_proof_id=(
+                    "effect-proof-invalid-verifier-return"
+                ),
+                warrant_id="warrant-invalid-verifier-return",
+            ),
+        )
+
+    assert verifier.calls == 1
+    assert captured.value.execution is execution
+    assert isinstance(captured.value.__cause__, TypeError)
+    assert str(captured.value.__cause__) == (
+        "verifier must return an EffectVerificationResult"
+    )
+    assert str(captured.value) == (
+        "effect verifier returned an invalid result"
     )
