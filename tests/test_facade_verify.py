@@ -19,6 +19,7 @@ from cage.core.verification import (
 from cage.errors import (
     CAGETypeError,
     IdentifierGenerationError,
+    VerificationResultMismatchError,
     VerifierContractError,
     VerifierInvocationError,
 )
@@ -565,4 +566,98 @@ def test_verify_wraps_invalid_verifier_return() -> None:
     )
     assert str(captured.value) == (
         "effect verifier returned an invalid result"
+    )
+
+
+def test_verify_wraps_mismatched_verification_result() -> None:
+    class MismatchedResultVerifier:
+        def __init__(self) -> None:
+            self.calls = 0
+            self.returned_result: EffectVerificationResult | None = None
+
+        def verify(
+            self,
+            *,
+            adapter_result: AdapterExecutionResult,
+        ) -> EffectVerificationResult:
+            self.calls += 1
+
+            mismatched_adapter_result = AdapterExecutionResult(
+                result_id="adapter-result-mismatched-verification",
+                execution_attempt=adapter_result.execution_attempt,
+                state=AdapterExecutionState.ACKNOWLEDGED,
+                references=("different-provider-receipt",),
+            )
+            result = EffectVerificationResult(
+                verification_id="verification-mismatched",
+                adapter_result=mismatched_adapter_result,
+                state=VerificationState.VERIFIED_BOUND,
+                references=("provider-observation-mismatched",),
+            )
+            self.returned_result = result
+            return result
+
+    cage = CAGE(
+        rule=lambda *args: EvaluationOutcome(
+            state=DecisionState.ADMITTED
+        )
+    )
+
+    action = cage.inputs.action(
+        action_type="database.delete",
+        principal_id="principal-1",
+        agent_id="agent-1",
+        resource_id="record-1",
+        requested_effect={"record_id": 1},
+    )
+    evaluation = cage.evaluate(
+        action=action,
+        idempotency_key=(
+            "delete-account-mismatched-verification-result"
+        ),
+    )
+    capability = ExecutionCapability(
+        capability_id="capability-1",
+        consequence_id=evaluation.consequence_id,
+        action_type="database.delete",
+        resource_id="record-1",
+    )
+    execution = cage.execute(
+        evaluation,
+        adapter=AcknowledgingAdapter(),
+        capability=capability,
+    )
+    verifier = MismatchedResultVerifier()
+
+    with pytest.raises(
+        VerificationResultMismatchError
+    ) as captured:
+        cage.verify(
+            execution,
+            verifier=verifier,
+            ids=AssuranceIds(
+                effect_id="effect-mismatched-verification",
+                effect_proof_id=(
+                    "effect-proof-mismatched-verification"
+                ),
+                warrant_id="warrant-mismatched-verification",
+            ),
+        )
+
+    assert verifier.calls == 1
+    assert verifier.returned_result is not None
+    assert (
+        verifier.returned_result.adapter_result
+        is not execution.adapter_result
+    )
+    assert captured.value.execution is execution
+    assert type(captured.value.__cause__).__name__ == (
+        "VerificationResultMismatchError"
+    )
+    assert str(captured.value.__cause__) == (
+        "verification adapter_result does not match "
+        "reconciled adapter_result"
+    )
+    assert str(captured.value) == (
+        "verification result refers to a different adapter result"
     )

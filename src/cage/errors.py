@@ -3,6 +3,9 @@ from typing import TYPE_CHECKING
 from cage.core.custody import (
     AdapterResultMismatchError as CoreAdapterResultMismatchError,
 )
+from cage.core.verification import (
+    VerificationResultMismatchError as CoreVerificationResultMismatchError,
+)
 
 if TYPE_CHECKING:
     from cage.core.execution import ExecutionAttempt
@@ -33,7 +36,7 @@ class IdentifierGenerationError(CAGEError):
 
 
 class ExecutionError(CAGEError):
-    """Base class for facade execution failures after possible dispatch."""
+    """Base class for facade failures tied to an execution."""
 
     def __init__(
         self,
@@ -59,12 +62,20 @@ class AdapterResultMismatchError(
 ):
     """Raised when an adapter result refers to another execution."""
 
+
 class VerifierInvocationError(ExecutionError):
     """Raised when an effect verifier callback fails."""
 
 
 class VerifierContractError(ExecutionError):
     """Raised when an effect verifier returns an invalid result."""
+
+
+class VerificationResultMismatchError(
+    ExecutionError,
+    CoreVerificationResultMismatchError,
+):
+    """Raised when verification refers to another adapter result."""
 
 
 class DuplicateExecutionError(CAGEError, RuntimeError):

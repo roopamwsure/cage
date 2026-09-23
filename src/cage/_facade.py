@@ -38,6 +38,7 @@ from cage.core.replay import create_replay_attempt
 from cage.core.verification import (
     EffectVerificationResult,
     EffectVerifier,
+    VerificationResultMismatchError as CoreVerificationResultMismatchError,
     create_effect_from_verification,
     reconcile_effect_verification,
 )
@@ -53,6 +54,7 @@ from cage.errors import (
     CAGETypeError,
     CAGEValueError,
     DuplicateExecutionError,
+    VerificationResultMismatchError,
     VerifierContractError,
     VerifierInvocationError,
 )
@@ -637,6 +639,12 @@ class CAGE:
                 "effect verifier invocation failed",
                 execution=execution,
             ) from failure.error
+        except CoreVerificationResultMismatchError as error:
+            raise VerificationResultMismatchError(
+                "verification result refers to a different "
+                "adapter result",
+                execution=execution,
+            ) from error
         except TypeError as error:
             raise VerifierContractError(
                 "effect verifier returned an invalid result",
