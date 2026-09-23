@@ -1,3 +1,5 @@
+from threading import Event, Thread
+
 import pytest
 
 from cage._facade import CAGE
@@ -19,6 +21,7 @@ from cage.core.verification import (
 from cage.errors import (
     AssuranceAssemblyError,
     CAGETypeError,
+    DuplicateVerificationError,
     IdentifierGenerationError,
     VerificationResultMismatchError,
     VerifierContractError,
@@ -987,3 +990,181 @@ def test_verify_propagates_verifier_interruption_and_allows_retry(
     assert assurance.effect_proof.proof_id == ids.effect_proof_id
     assert assurance.warrant.warrant_id == ids.warrant_id
     assert verifier.calls == [original_adapter_result] * 2
+
+
+def test_verify_rejects_second_first_assurance_after_success() -> None:
+    cage = CAGE(
+        rule=lambda *args: EvaluationOutcome(
+            state=DecisionState.ADMITTED
+        )
+    )
+    action = cage.inputs.action(
+        action_type="database.delete",
+        principal_id="principal-1",
+        agent_id="agent-1",
+        resource_id="record-1",
+        requested_effect={"record_id": 1},
+    )
+    evaluation = cage.evaluate(
+        action=action,
+        idempotency_key="delete-account-single-first-assurance",
+    )
+    capability = ExecutionCapability(
+        capability_id="capability-1",
+        consequence_id=evaluation.consequence_id,
+        action_type="database.delete",
+        resource_id="record-1",
+    )
+    execution = cage.execute(
+        evaluation,
+        adapter=AcknowledgingAdapter(),
+        capability=capability,
+    )
+    verifier = BoundVerifier()
+    first = cage.verify(
+        execution,
+        verifier=verifier,
+        ids=AssuranceIds(
+            effect_id="effect-first",
+            effect_proof_id="effect-proof-first",
+            warrant_id="warrant-first",
+        ),
+    )
+
+    with pytest.raises(DuplicateVerificationError) as captured:
+        cage.verify(
+            execution,
+            verifier=verifier,
+            ids=AssuranceIds(
+                effect_id="effect-second",
+                effect_proof_id="effect-proof-second",
+                warrant_id="warrant-second",
+            ),
+        )
+
+    assert captured.value.execution is execution
+    assert captured.value.assurance is first
+    assert verifier.calls == [execution.adapter_result]
+
+
+def test_verify_rejects_concurrent_first_assurance() -> None:
+    class BlockingVerifier(BoundVerifier):
+        def __init__(self) -> None:
+            super().__init__()
+            self.entered = Event()
+            self.release = Event()
+
+        def verify(
+            self,
+            *,
+            adapter_result: AdapterExecutionResult,
+        ) -> EffectVerificationResult:
+            self.entered.set()
+            if not self.release.wait(timeout=5):
+                raise TimeoutError("verifier was not released")
+            return super().verify(adapter_result=adapter_result)
+
+    cage = CAGE(
+        rule=lambda *args: EvaluationOutcome(
+            state=DecisionState.ADMITTED
+        )
+    )
+    action = cage.inputs.action(
+        action_type="database.delete",
+        principal_id="principal-1",
+        agent_id="agent-1",
+        resource_id="record-1",
+        requested_effect={"record_id": 1},
+    )
+    evaluation = cage.evaluate(
+        action=action,
+        idempotency_key="delete-account-concurrent-verification",
+    )
+    capability = ExecutionCapability(
+        capability_id="capability-1",
+        consequence_id=evaluation.consequence_id,
+        action_type="database.delete",
+        resource_id="record-1",
+    )
+    execution = cage.execute(
+        evaluation,
+        adapter=AcknowledgingAdapter(),
+        capability=capability,
+    )
+    verifier = BlockingVerifier()
+    results = []
+    errors: list[BaseException] = []
+
+    def first_call() -> None:
+        try:
+            results.append(cage.verify(execution, verifier=verifier))
+        except BaseException as error:
+            errors.append(error)
+
+    thread = Thread(target=first_call)
+    thread.start()
+    try:
+        assert verifier.entered.wait(timeout=5)
+        with pytest.raises(DuplicateVerificationError) as captured:
+            cage.verify(execution, verifier=verifier)
+        assert captured.value.execution is execution
+        assert captured.value.assurance is None
+        assert verifier.calls == []
+    finally:
+        verifier.release.set()
+        thread.join(timeout=5)
+
+    assert not thread.is_alive()
+    assert errors == []
+    assert len(results) == 1
+    assert verifier.calls == [execution.adapter_result]
+
+
+def test_verify_releases_reservation_after_callback_failure() -> None:
+    class FailOnceVerifier(BoundVerifier):
+        def verify(
+            self,
+            *,
+            adapter_result: AdapterExecutionResult,
+        ) -> EffectVerificationResult:
+            if not self.calls:
+                self.calls.append(adapter_result)
+                raise RuntimeError("observation unavailable")
+            return super().verify(adapter_result=adapter_result)
+
+    cage = CAGE(
+        rule=lambda *args: EvaluationOutcome(
+            state=DecisionState.ADMITTED
+        )
+    )
+    action = cage.inputs.action(
+        action_type="database.delete",
+        principal_id="principal-1",
+        agent_id="agent-1",
+        resource_id="record-1",
+        requested_effect={"record_id": 1},
+    )
+    evaluation = cage.evaluate(
+        action=action,
+        idempotency_key="delete-account-retry-verification",
+    )
+    capability = ExecutionCapability(
+        capability_id="capability-1",
+        consequence_id=evaluation.consequence_id,
+        action_type="database.delete",
+        resource_id="record-1",
+    )
+    execution = cage.execute(
+        evaluation,
+        adapter=AcknowledgingAdapter(),
+        capability=capability,
+    )
+    verifier = FailOnceVerifier()
+
+    with pytest.raises(VerifierInvocationError) as captured:
+        cage.verify(execution, verifier=verifier)
+    assert captured.value.execution is execution
+
+    assurance = cage.verify(execution, verifier=verifier)
+    assert assurance.execution is execution
+    assert verifier.calls == [execution.adapter_result] * 2

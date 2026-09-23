@@ -65,6 +65,8 @@ def test_sdk_identifier_result_and_error_imports() -> None:
         CAGETypeError,
         CAGEValueError,
         DuplicateExecutionError,
+        DuplicateReconciliationError,
+        DuplicateVerificationError,
         ExecutionError,
         IdentifierGenerationError,
         VerificationResultMismatchError,
@@ -110,5 +112,7 @@ def test_sdk_identifier_result_and_error_imports() -> None:
             VerificationResultMismatchError,
             AssuranceAssemblyError,
             DuplicateExecutionError,
+            DuplicateReconciliationError,
+            DuplicateVerificationError,
         )
     )

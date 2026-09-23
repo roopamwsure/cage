@@ -116,3 +116,37 @@ class DuplicateExecutionError(CAGEError, RuntimeError):
             "execution dispatch is already reserved for "
             f"consequence {consequence_id}"
         )
+
+
+class DuplicateVerificationError(CAGEError, RuntimeError):
+    """Raised when first verification is in progress or completed."""
+
+    def __init__(
+        self,
+        *,
+        execution: "ExecutionResult",
+        assurance: "AssuranceResult | None",
+    ) -> None:
+        self.execution = execution
+        self.assurance = assurance
+        super().__init__(
+            "first verification is already reserved for "
+            f"execution {execution.execution_attempt.execution_attempt_id}"
+        )
+
+
+class DuplicateReconciliationError(CAGEError, RuntimeError):
+    """Raised when a predecessor has an in-progress or completed successor."""
+
+    def __init__(
+        self,
+        *,
+        previous: "AssuranceResult",
+        assurance: "AssuranceResult | None",
+    ) -> None:
+        self.previous = previous
+        self.assurance = assurance
+        super().__init__(
+            "reconciliation is already reserved for "
+            f"warrant {previous.warrant.warrant_id}"
+        )

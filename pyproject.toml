@@ -17,5 +17,15 @@ dev = [
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.data-files]
+"share/cage-assurance/examples" = [
+    "examples/sqlite_delete.py",
+    "examples/sqlite_reconcile.py",
+]
+"share/cage-assurance/docs" = [
+    "docs/quickstart.md",
+    "docs/reconciliation-walkthrough.md",
+]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -55,6 +55,8 @@ from cage.errors import (
     CAGETypeError,
     CAGEValueError,
     DuplicateExecutionError,
+    DuplicateReconciliationError,
+    DuplicateVerificationError,
     VerificationResultMismatchError,
     VerifierContractError,
     VerifierInvocationError,
@@ -211,7 +213,9 @@ class CAGE:
         "_idempotency_registry",
         "_inputs",
         "_rule",
+        "_reconciliation_records",
         "_state_lock",
+        "_verification_records",
     )
 
     def __init__(
@@ -237,6 +241,12 @@ class CAGE:
         )
         self._idempotency_registry = IdempotencyRegistry()
         self._dispatch_records: dict[str, _DispatchRecord] = {}
+        self._reconciliation_records: dict[
+            tuple[str, str], AssuranceResult | None
+        ] = {}
+        self._verification_records: dict[
+            tuple[str, str], AssuranceResult | None
+        ] = {}
         self._state_lock = Lock()
 
     @property
@@ -585,11 +595,38 @@ class CAGE:
         verifier: EffectVerifier,
         ids: AssuranceIds | None = None,
     ) -> AssuranceResult:
-        return self._assure(
-            execution,
-            verifier=verifier,
-            ids=ids,
+        if not isinstance(execution, ExecutionResult):
+            raise CAGETypeError(
+                "execution must be an ExecutionResult"
+            )
+
+        key = (
+            execution.consequence_id,
+            execution.execution_attempt.execution_attempt_id,
         )
+        with self._state_lock:
+            if key in self._verification_records:
+                raise DuplicateVerificationError(
+                    execution=execution,
+                    assurance=self._verification_records[key],
+                )
+            self._verification_records[key] = None
+
+        try:
+            assurance = self._assure(
+                execution,
+                verifier=verifier,
+                ids=ids,
+            )
+        except BaseException:
+            with self._state_lock:
+                del self._verification_records[key]
+            raise
+
+        with self._state_lock:
+            self._verification_records[key] = assurance
+
+        return assurance
 
     def reconcile(
         self,
@@ -603,12 +640,34 @@ class CAGE:
                 "previous must be an AssuranceResult"
             )
 
-        return self._assure(
-            previous.execution,
-            verifier=verifier,
-            ids=ids,
-            previous=previous,
+        key = (
+            previous.consequence_id,
+            previous.warrant.warrant_id,
         )
+        with self._state_lock:
+            if key in self._reconciliation_records:
+                raise DuplicateReconciliationError(
+                    previous=previous,
+                    assurance=self._reconciliation_records[key],
+                )
+            self._reconciliation_records[key] = None
+
+        try:
+            assurance = self._assure(
+                previous.execution,
+                verifier=verifier,
+                ids=ids,
+                previous=previous,
+            )
+        except BaseException:
+            with self._state_lock:
+                del self._reconciliation_records[key]
+            raise
+
+        with self._state_lock:
+            self._reconciliation_records[key] = assurance
+
+        return assurance
 
     def _assure(
         self,
