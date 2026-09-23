@@ -51,6 +51,7 @@ from cage.errors import (
     AdapterContractError,
     AdapterInvocationError,
     AdapterResultMismatchError,
+    AssuranceAssemblyError,
     CAGETypeError,
     CAGEValueError,
     DuplicateExecutionError,
@@ -651,26 +652,54 @@ class CAGE:
                 execution=execution,
             ) from error
 
-        effect = create_effect_from_verification(
-            effect_id=effect_id,
-            verification=verification,
-        )
-        effect_proof = create_effect_proof(
-            proof_id=effect_proof_id,
-            effect=effect,
-            verification=verification,
-        )
-        warrant = Warrant(
-            warrant_id=warrant_id,
-            schema_version="0.7",
-            decision_proof=execution.decision_proof,
-            effect_proof=effect_proof,
-            previous_warrant_id=(
-                execution.evaluation.warrant.warrant_id
-            ),
-        )
+        try:
+            effect = create_effect_from_verification(
+                effect_id=effect_id,
+                verification=verification,
+            )
+        except Exception as error:
+            raise AssuranceAssemblyError(
+                "effect assembly failed",
+                execution=execution,
+                stage="effect",
+            ) from error
+        try:
+            effect_proof = create_effect_proof(
+                proof_id=effect_proof_id,
+                effect=effect,
+                verification=verification,
+            )
+        except Exception as error:
+            raise AssuranceAssemblyError(
+                "effect proof assembly failed",
+                execution=execution,
+                stage="effect_proof",
+            ) from error
+        try:
+            warrant = Warrant(
+                warrant_id=warrant_id,
+                schema_version="0.7",
+                decision_proof=execution.decision_proof,
+                effect_proof=effect_proof,
+                previous_warrant_id=(
+                    execution.evaluation.warrant.warrant_id
+                ),
+            )
+        except Exception as error:
+            raise AssuranceAssemblyError(
+                "warrant assembly failed",
+                execution=execution,
+                stage="warrant",
+            ) from error
 
-        return AssuranceResult(
-            execution=execution,
-            warrant=warrant,
-        )
+        try:
+            return AssuranceResult(
+                execution=execution,
+                warrant=warrant,
+            )
+        except Exception as error:
+            raise AssuranceAssemblyError(
+                "assurance result assembly failed",
+                execution=execution,
+                stage="assurance_result",
+            ) from error

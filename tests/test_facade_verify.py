@@ -17,6 +17,7 @@ from cage.core.verification import (
     VerificationState,
 )
 from cage.errors import (
+    AssuranceAssemblyError,
     CAGETypeError,
     IdentifierGenerationError,
     VerificationResultMismatchError,
@@ -661,3 +662,250 @@ def test_verify_wraps_mismatched_verification_result() -> None:
     assert str(captured.value) == (
         "verification result refers to a different adapter result"
     )
+
+
+def test_verify_wraps_effect_assembly_failure(monkeypatch) -> None:
+    cage = CAGE(
+        rule=lambda *args: EvaluationOutcome(
+            state=DecisionState.ADMITTED
+        )
+    )
+    action = cage.inputs.action(
+        action_type="database.delete",
+        principal_id="principal-1",
+        agent_id="agent-1",
+        resource_id="record-1",
+        requested_effect={"record_id": 1},
+    )
+    evaluation = cage.evaluate(
+        action=action,
+        idempotency_key="delete-account-effect-assembly-failure",
+    )
+    capability = ExecutionCapability(
+        capability_id="capability-1",
+        consequence_id=evaluation.consequence_id,
+        action_type="database.delete",
+        resource_id="record-1",
+    )
+    execution = cage.execute(
+        evaluation,
+        adapter=AcknowledgingAdapter(),
+        capability=capability,
+    )
+    verifier = BoundVerifier()
+    ids = AssuranceIds(
+        effect_id="effect-assembly-failure",
+        effect_proof_id="effect-proof-assembly-failure",
+        warrant_id="warrant-assembly-failure",
+    )
+    original_adapter_result = execution.adapter_result
+    failure = ValueError("effect assembly failed")
+
+    def fail_effect_assembly(*, effect_id, verification):
+        assert effect_id == ids.effect_id
+        assert verification.adapter_result is original_adapter_result
+        raise failure
+
+    with monkeypatch.context() as patch:
+        patch.setattr(
+            "cage._facade.create_effect_from_verification",
+            fail_effect_assembly,
+        )
+        with pytest.raises(AssuranceAssemblyError) as captured:
+            cage.verify(execution, verifier=verifier, ids=ids)
+
+    assert verifier.calls == [original_adapter_result]
+    assert captured.value.stage == "effect"
+    assert captured.value.execution is execution
+    assert captured.value.__cause__ is failure
+    assert execution.adapter_result is original_adapter_result
+
+    assurance = cage.verify(execution, verifier=verifier, ids=ids)
+    assert assurance.execution is execution
+    assert assurance.effect.effect_id == ids.effect_id
+    assert verifier.calls == [original_adapter_result] * 2
+
+
+def test_verify_wraps_effect_proof_assembly_failure(monkeypatch) -> None:
+    cage = CAGE(
+        rule=lambda *args: EvaluationOutcome(
+            state=DecisionState.ADMITTED
+        )
+    )
+    action = cage.inputs.action(
+        action_type="database.delete",
+        principal_id="principal-1",
+        agent_id="agent-1",
+        resource_id="record-1",
+        requested_effect={"record_id": 1},
+    )
+    evaluation = cage.evaluate(
+        action=action,
+        idempotency_key="delete-account-effect-proof-assembly-failure",
+    )
+    capability = ExecutionCapability(
+        capability_id="capability-1",
+        consequence_id=evaluation.consequence_id,
+        action_type="database.delete",
+        resource_id="record-1",
+    )
+    execution = cage.execute(
+        evaluation,
+        adapter=AcknowledgingAdapter(),
+        capability=capability,
+    )
+    verifier = BoundVerifier()
+    ids = AssuranceIds(
+        effect_id="effect-proof-failure-effect",
+        effect_proof_id="effect-proof-failure",
+        warrant_id="effect-proof-failure-warrant",
+    )
+    original_adapter_result = execution.adapter_result
+    failure = ValueError("effect proof assembly failed")
+
+    def fail_effect_proof(*, proof_id, effect, verification):
+        assert proof_id == ids.effect_proof_id
+        assert effect.effect_id == ids.effect_id
+        assert verification.adapter_result is original_adapter_result
+        raise failure
+
+    with monkeypatch.context() as patch:
+        patch.setattr(
+            "cage._facade.create_effect_proof",
+            fail_effect_proof,
+        )
+        with pytest.raises(AssuranceAssemblyError) as captured:
+            cage.verify(execution, verifier=verifier, ids=ids)
+
+    assert verifier.calls == [original_adapter_result]
+    assert captured.value.stage == "effect_proof"
+    assert captured.value.execution is execution
+    assert captured.value.__cause__ is failure
+    assert execution.adapter_result is original_adapter_result
+
+    assurance = cage.verify(execution, verifier=verifier, ids=ids)
+    assert assurance.execution is execution
+    assert assurance.effect_proof.proof_id == ids.effect_proof_id
+    assert verifier.calls == [original_adapter_result] * 2
+
+
+def test_verify_wraps_warrant_assembly_failure(monkeypatch) -> None:
+    cage = CAGE(
+        rule=lambda *args: EvaluationOutcome(
+            state=DecisionState.ADMITTED
+        )
+    )
+    action = cage.inputs.action(
+        action_type="database.delete",
+        principal_id="principal-1",
+        agent_id="agent-1",
+        resource_id="record-1",
+        requested_effect={"record_id": 1},
+    )
+    evaluation = cage.evaluate(
+        action=action,
+        idempotency_key="delete-account-warrant-assembly-failure",
+    )
+    capability = ExecutionCapability(
+        capability_id="capability-1",
+        consequence_id=evaluation.consequence_id,
+        action_type="database.delete",
+        resource_id="record-1",
+    )
+    execution = cage.execute(
+        evaluation,
+        adapter=AcknowledgingAdapter(),
+        capability=capability,
+    )
+    verifier = BoundVerifier()
+    ids = AssuranceIds(
+        effect_id="warrant-failure-effect",
+        effect_proof_id="warrant-failure-effect-proof",
+        warrant_id="warrant-failure",
+    )
+    original_adapter_result = execution.adapter_result
+    failure = ValueError("warrant assembly failed")
+
+    def fail_warrant(**kwargs):
+        assert kwargs["warrant_id"] == ids.warrant_id
+        assert kwargs["decision_proof"] is execution.decision_proof
+        assert kwargs["effect_proof"].proof_id == ids.effect_proof_id
+        assert kwargs["previous_warrant_id"] == evaluation.warrant.warrant_id
+        raise failure
+
+    with monkeypatch.context() as patch:
+        patch.setattr("cage._facade.Warrant", fail_warrant)
+        with pytest.raises(AssuranceAssemblyError) as captured:
+            cage.verify(execution, verifier=verifier, ids=ids)
+
+    assert verifier.calls == [original_adapter_result]
+    assert captured.value.stage == "warrant"
+    assert captured.value.execution is execution
+    assert captured.value.__cause__ is failure
+    assert execution.adapter_result is original_adapter_result
+
+    assurance = cage.verify(execution, verifier=verifier, ids=ids)
+    assert assurance.execution is execution
+    assert assurance.warrant.warrant_id == ids.warrant_id
+    assert verifier.calls == [original_adapter_result] * 2
+
+
+def test_verify_wraps_assurance_result_assembly_failure(monkeypatch) -> None:
+    cage = CAGE(
+        rule=lambda *args: EvaluationOutcome(
+            state=DecisionState.ADMITTED
+        )
+    )
+    action = cage.inputs.action(
+        action_type="database.delete",
+        principal_id="principal-1",
+        agent_id="agent-1",
+        resource_id="record-1",
+        requested_effect={"record_id": 1},
+    )
+    evaluation = cage.evaluate(
+        action=action,
+        idempotency_key="delete-account-assurance-result-assembly-failure",
+    )
+    capability = ExecutionCapability(
+        capability_id="capability-1",
+        consequence_id=evaluation.consequence_id,
+        action_type="database.delete",
+        resource_id="record-1",
+    )
+    execution = cage.execute(
+        evaluation,
+        adapter=AcknowledgingAdapter(),
+        capability=capability,
+    )
+    verifier = BoundVerifier()
+    ids = AssuranceIds(
+        effect_id="assurance-result-failure-effect",
+        effect_proof_id="assurance-result-failure-effect-proof",
+        warrant_id="assurance-result-failure-warrant",
+    )
+    original_adapter_result = execution.adapter_result
+    failure = ValueError("assurance result assembly failed")
+
+    def fail_assurance_result(*, execution, warrant):
+        assert execution is original_execution
+        assert warrant.warrant_id == ids.warrant_id
+        assert warrant.effect_proof.proof_id == ids.effect_proof_id
+        raise failure
+
+    original_execution = execution
+    with monkeypatch.context() as patch:
+        patch.setattr("cage._facade.AssuranceResult", fail_assurance_result)
+        with pytest.raises(AssuranceAssemblyError) as captured:
+            cage.verify(execution, verifier=verifier, ids=ids)
+
+    assert verifier.calls == [original_adapter_result]
+    assert captured.value.stage == "assurance_result"
+    assert captured.value.execution is execution
+    assert captured.value.__cause__ is failure
+    assert execution.adapter_result is original_adapter_result
+
+    assurance = cage.verify(execution, verifier=verifier, ids=ids)
+    assert assurance.execution is execution
+    assert assurance.warrant.warrant_id == ids.warrant_id
+    assert verifier.calls == [original_adapter_result] * 2

@@ -78,6 +78,20 @@ class VerificationResultMismatchError(
     """Raised when verification refers to another adapter result."""
 
 
+class AssuranceAssemblyError(ExecutionError):
+    """Raised when an assurance record cannot be assembled."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        execution: "ExecutionResult",
+        stage: str,
+    ) -> None:
+        self.stage = stage
+        super().__init__(message, execution=execution)
+
+
 class DuplicateExecutionError(CAGEError, RuntimeError):
     """Raised when a Consequence is already reserved for execution."""
 
