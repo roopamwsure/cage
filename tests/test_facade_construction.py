@@ -75,7 +75,7 @@ def test_facade_properties_are_read_only() -> None:
         )
 
 
-def test_facade_is_not_exported_from_package_root_yet() -> None:
+def test_facade_is_exported_from_package_root() -> None:
     import cage
 
-    assert not hasattr(cage, "CAGE")
+    assert cage.CAGE is CAGE
