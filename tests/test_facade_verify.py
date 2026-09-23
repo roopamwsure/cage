@@ -700,10 +700,12 @@ def test_verify_wraps_effect_assembly_failure(monkeypatch) -> None:
     )
     original_adapter_result = execution.adapter_result
     failure = ValueError("effect assembly failed")
+    observed_verifications: list[EffectVerificationResult] = []
 
     def fail_effect_assembly(*, effect_id, verification):
         assert effect_id == ids.effect_id
         assert verification.adapter_result is original_adapter_result
+        observed_verifications.append(verification)
         raise failure
 
     with monkeypatch.context() as patch:
@@ -717,6 +719,7 @@ def test_verify_wraps_effect_assembly_failure(monkeypatch) -> None:
     assert verifier.calls == [original_adapter_result]
     assert captured.value.stage == "effect"
     assert captured.value.execution is execution
+    assert captured.value.verification is observed_verifications[0]
     assert captured.value.__cause__ is failure
     assert execution.adapter_result is original_adapter_result
 
@@ -762,11 +765,13 @@ def test_verify_wraps_effect_proof_assembly_failure(monkeypatch) -> None:
     )
     original_adapter_result = execution.adapter_result
     failure = ValueError("effect proof assembly failed")
+    observed_verifications: list[EffectVerificationResult] = []
 
     def fail_effect_proof(*, proof_id, effect, verification):
         assert proof_id == ids.effect_proof_id
         assert effect.effect_id == ids.effect_id
         assert verification.adapter_result is original_adapter_result
+        observed_verifications.append(verification)
         raise failure
 
     with monkeypatch.context() as patch:
@@ -780,6 +785,7 @@ def test_verify_wraps_effect_proof_assembly_failure(monkeypatch) -> None:
     assert verifier.calls == [original_adapter_result]
     assert captured.value.stage == "effect_proof"
     assert captured.value.execution is execution
+    assert captured.value.verification is observed_verifications[0]
     assert captured.value.__cause__ is failure
     assert execution.adapter_result is original_adapter_result
 
@@ -825,12 +831,14 @@ def test_verify_wraps_warrant_assembly_failure(monkeypatch) -> None:
     )
     original_adapter_result = execution.adapter_result
     failure = ValueError("warrant assembly failed")
+    observed_verifications: list[EffectVerificationResult] = []
 
     def fail_warrant(**kwargs):
         assert kwargs["warrant_id"] == ids.warrant_id
         assert kwargs["decision_proof"] is execution.decision_proof
         assert kwargs["effect_proof"].proof_id == ids.effect_proof_id
         assert kwargs["previous_warrant_id"] == evaluation.warrant.warrant_id
+        observed_verifications.append(kwargs["effect_proof"].verification)
         raise failure
 
     with monkeypatch.context() as patch:
@@ -841,6 +849,7 @@ def test_verify_wraps_warrant_assembly_failure(monkeypatch) -> None:
     assert verifier.calls == [original_adapter_result]
     assert captured.value.stage == "warrant"
     assert captured.value.execution is execution
+    assert captured.value.verification is observed_verifications[0]
     assert captured.value.__cause__ is failure
     assert execution.adapter_result is original_adapter_result
 
@@ -886,11 +895,13 @@ def test_verify_wraps_assurance_result_assembly_failure(monkeypatch) -> None:
     )
     original_adapter_result = execution.adapter_result
     failure = ValueError("assurance result assembly failed")
+    observed_verifications: list[EffectVerificationResult] = []
 
     def fail_assurance_result(*, execution, warrant):
         assert execution is original_execution
         assert warrant.warrant_id == ids.warrant_id
         assert warrant.effect_proof.proof_id == ids.effect_proof_id
+        observed_verifications.append(warrant.effect_proof.verification)
         raise failure
 
     original_execution = execution
@@ -902,6 +913,7 @@ def test_verify_wraps_assurance_result_assembly_failure(monkeypatch) -> None:
     assert verifier.calls == [original_adapter_result]
     assert captured.value.stage == "assurance_result"
     assert captured.value.execution is execution
+    assert captured.value.verification is observed_verifications[0]
     assert captured.value.__cause__ is failure
     assert execution.adapter_result is original_adapter_result
 

@@ -9,6 +9,7 @@ from cage.core.verification import (
 
 if TYPE_CHECKING:
     from cage.core.execution import ExecutionAttempt
+    from cage.core.verification import EffectVerificationResult
     from cage.identifiers import IdentityKind
     from cage.results import ExecutionResult
 
@@ -79,16 +80,18 @@ class VerificationResultMismatchError(
 
 
 class AssuranceAssemblyError(ExecutionError):
-    """Raised when an assurance record cannot be assembled."""
+    """Raised when assembly fails after a valid verification."""
 
     def __init__(
         self,
         message: str,
         *,
         execution: "ExecutionResult",
+        verification: "EffectVerificationResult",
         stage: str,
     ) -> None:
         self.stage = stage
+        self.verification = verification
         super().__init__(message, execution=execution)
 
 

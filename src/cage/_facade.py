@@ -661,6 +661,7 @@ class CAGE:
             raise AssuranceAssemblyError(
                 "effect assembly failed",
                 execution=execution,
+                verification=verification,
                 stage="effect",
             ) from error
         try:
@@ -673,6 +674,7 @@ class CAGE:
             raise AssuranceAssemblyError(
                 "effect proof assembly failed",
                 execution=execution,
+                verification=verification,
                 stage="effect_proof",
             ) from error
         try:
@@ -689,6 +691,7 @@ class CAGE:
             raise AssuranceAssemblyError(
                 "warrant assembly failed",
                 execution=execution,
+                verification=verification,
                 stage="warrant",
             ) from error
 
@@ -701,5 +704,6 @@ class CAGE:
             raise AssuranceAssemblyError(
                 "assurance result assembly failed",
                 execution=execution,
+                verification=verification,
                 stage="assurance_result",
             ) from error
