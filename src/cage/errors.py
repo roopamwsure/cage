@@ -11,7 +11,7 @@ if TYPE_CHECKING:
     from cage.core.execution import ExecutionAttempt
     from cage.core.verification import EffectVerificationResult
     from cage.identifiers import IdentityKind
-    from cage.results import ExecutionResult
+    from cage.results import AssuranceResult, ExecutionResult
 
 
 class CAGEError(Exception):
@@ -44,8 +44,10 @@ class ExecutionError(CAGEError):
         message: str,
         *,
         execution: "ExecutionResult",
+        previous: "AssuranceResult | None" = None,
     ) -> None:
         self.execution = execution
+        self.previous = previous
         super().__init__(message)
 
 
@@ -89,10 +91,11 @@ class AssuranceAssemblyError(ExecutionError):
         execution: "ExecutionResult",
         verification: "EffectVerificationResult",
         stage: str,
+        previous: "AssuranceResult | None" = None,
     ) -> None:
         self.stage = stage
         self.verification = verification
-        super().__init__(message, execution=execution)
+        super().__init__(message, execution=execution, previous=previous)
 
 
 class DuplicateExecutionError(CAGEError, RuntimeError):

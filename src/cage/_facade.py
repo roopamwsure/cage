@@ -585,6 +585,39 @@ class CAGE:
         verifier: EffectVerifier,
         ids: AssuranceIds | None = None,
     ) -> AssuranceResult:
+        return self._assure(
+            execution,
+            verifier=verifier,
+            ids=ids,
+        )
+
+    def reconcile(
+        self,
+        previous: AssuranceResult,
+        *,
+        verifier: EffectVerifier,
+        ids: AssuranceIds | None = None,
+    ) -> AssuranceResult:
+        if not isinstance(previous, AssuranceResult):
+            raise CAGETypeError(
+                "previous must be an AssuranceResult"
+            )
+
+        return self._assure(
+            previous.execution,
+            verifier=verifier,
+            ids=ids,
+            previous=previous,
+        )
+
+    def _assure(
+        self,
+        execution: ExecutionResult,
+        *,
+        verifier: EffectVerifier,
+        ids: AssuranceIds | None = None,
+        previous: AssuranceResult | None = None,
+    ) -> AssuranceResult:
         if not isinstance(execution, ExecutionResult):
             raise CAGETypeError(
                 "execution must be an ExecutionResult"
@@ -626,6 +659,25 @@ class CAGE:
             )
         )
 
+        if (
+            previous is not None
+            and warrant_id == previous.warrant.warrant_id
+        ):
+            raise CAGEValueError(
+                "warrant_id must differ from previous warrant_id"
+            )
+
+        if previous is not None:
+            if effect_id == previous.effect.effect_id:
+                raise CAGEValueError(
+                    "effect_id must differ from previous effect_id"
+                )
+            if effect_proof_id == previous.effect_proof.proof_id:
+                raise CAGEValueError(
+                    "effect_proof_id must differ from "
+                    "previous effect_proof_id"
+                )
+
         tracking_verifier = _VerificationTrackingVerifier(
             verifier=verifier,
         )
@@ -639,17 +691,20 @@ class CAGE:
             raise VerifierInvocationError(
                 "effect verifier invocation failed",
                 execution=execution,
+                previous=previous,
             ) from failure.error
         except CoreVerificationResultMismatchError as error:
             raise VerificationResultMismatchError(
                 "verification result refers to a different "
                 "adapter result",
                 execution=execution,
+                previous=previous,
             ) from error
         except TypeError as error:
             raise VerifierContractError(
                 "effect verifier returned an invalid result",
                 execution=execution,
+                previous=previous,
             ) from error
 
         try:
@@ -663,6 +718,7 @@ class CAGE:
                 execution=execution,
                 verification=verification,
                 stage="effect",
+                previous=previous,
             ) from error
         try:
             effect_proof = create_effect_proof(
@@ -676,6 +732,7 @@ class CAGE:
                 execution=execution,
                 verification=verification,
                 stage="effect_proof",
+                previous=previous,
             ) from error
         try:
             warrant = Warrant(
@@ -684,7 +741,9 @@ class CAGE:
                 decision_proof=execution.decision_proof,
                 effect_proof=effect_proof,
                 previous_warrant_id=(
-                    execution.evaluation.warrant.warrant_id
+                    previous.warrant.warrant_id
+                    if previous is not None
+                    else execution.evaluation.warrant.warrant_id
                 ),
             )
         except Exception as error:
@@ -693,6 +752,7 @@ class CAGE:
                 execution=execution,
                 verification=verification,
                 stage="warrant",
+                previous=previous,
             ) from error
 
         try:
@@ -706,4 +766,5 @@ class CAGE:
                 execution=execution,
                 verification=verification,
                 stage="assurance_result",
+                previous=previous,
             ) from error
