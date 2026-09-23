@@ -16,7 +16,11 @@ from cage.core.verification import (
     EffectVerificationResult,
     VerificationState,
 )
-from cage.errors import CAGETypeError, IdentifierGenerationError
+from cage.errors import (
+    CAGETypeError,
+    IdentifierGenerationError,
+    VerifierInvocationError,
+)
 from cage.identifiers import AssuranceIds, IdentityKind
 from cage.results import ExecutionObservationOrigin
 
@@ -429,3 +433,68 @@ def test_verify_rejects_invalid_verifier() -> None:
                 warrant_id="warrant-1",
             ),
         )
+
+
+def test_verify_wraps_verifier_invocation_failure() -> None:
+    class RaisingVerifier:
+        def __init__(self) -> None:
+            self.calls = 0
+            self.error = RuntimeError(
+                "verification provider unavailable"
+            )
+
+        def verify(
+            self,
+            *,
+            adapter_result: AdapterExecutionResult,
+        ) -> EffectVerificationResult:
+            self.calls += 1
+            raise self.error
+
+    cage = CAGE(
+        rule=lambda *args: EvaluationOutcome(
+            state=DecisionState.ADMITTED
+        )
+    )
+
+    action = cage.inputs.action(
+        action_type="database.delete",
+        principal_id="principal-1",
+        agent_id="agent-1",
+        resource_id="record-1",
+        requested_effect={"record_id": 1},
+    )
+    evaluation = cage.evaluate(
+        action=action,
+        idempotency_key="delete-account-verifier-failure",
+    )
+    capability = ExecutionCapability(
+        capability_id="capability-1",
+        consequence_id=evaluation.consequence_id,
+        action_type="database.delete",
+        resource_id="record-1",
+    )
+    execution = cage.execute(
+        evaluation,
+        adapter=AcknowledgingAdapter(),
+        capability=capability,
+    )
+    verifier = RaisingVerifier()
+
+    with pytest.raises(VerifierInvocationError) as captured:
+        cage.verify(
+            execution,
+            verifier=verifier,
+            ids=AssuranceIds(
+                effect_id="effect-verifier-failure",
+                effect_proof_id="effect-proof-verifier-failure",
+                warrant_id="warrant-verifier-failure",
+            ),
+        )
+
+    assert verifier.calls == 1
+    assert captured.value.execution is execution
+    assert captured.value.__cause__ is verifier.error
+    assert str(captured.value) == (
+        "effect verifier invocation failed"
+    )

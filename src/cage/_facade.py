@@ -36,6 +36,7 @@ from cage.core.idempotency import (
 )
 from cage.core.replay import create_replay_attempt
 from cage.core.verification import (
+    EffectVerificationResult,
     EffectVerifier,
     create_effect_from_verification,
     reconcile_effect_verification,
@@ -52,6 +53,7 @@ from cage.errors import (
     CAGETypeError,
     CAGEValueError,
     DuplicateExecutionError,
+    VerifierInvocationError,
 )
 from cage.identifiers import (
     AssuranceIds,
@@ -108,6 +110,33 @@ class _DispatchTrackingAdapter:
             )
         except Exception as error:
             raise _AdapterCallbackFailure(error) from error
+
+
+class _VerifierCallbackFailure(Exception):
+    def __init__(self, error: Exception) -> None:
+        self.error = error
+        super().__init__("verifier callback failed")
+
+
+class _VerificationTrackingVerifier:
+    def __init__(
+        self,
+        *,
+        verifier: EffectVerifier,
+    ) -> None:
+        self._verifier = verifier
+
+    def verify(
+        self,
+        *,
+        adapter_result: AdapterExecutionResult,
+    ) -> EffectVerificationResult:
+        try:
+            return self._verifier.verify(
+                adapter_result=adapter_result,
+            )
+        except Exception as error:
+            raise _VerifierCallbackFailure(error) from error
 
 
 def _create_sdk_recovery_execution(
@@ -593,10 +622,21 @@ class CAGE:
             )
         )
 
-        verification = reconcile_effect_verification(
-            adapter_result=execution.adapter_result,
+        tracking_verifier = _VerificationTrackingVerifier(
             verifier=verifier,
         )
+
+        try:
+            verification = reconcile_effect_verification(
+                adapter_result=execution.adapter_result,
+                verifier=tracking_verifier,
+            )
+        except _VerifierCallbackFailure as failure:
+            raise VerifierInvocationError(
+                "effect verifier invocation failed",
+                execution=execution,
+            ) from failure.error
+
         effect = create_effect_from_verification(
             effect_id=effect_id,
             verification=verification,

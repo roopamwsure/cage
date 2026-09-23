@@ -59,6 +59,9 @@ class AdapterResultMismatchError(
 ):
     """Raised when an adapter result refers to another execution."""
 
+class VerifierInvocationError(ExecutionError):
+    """Raised when an effect verifier callback fails."""
+
 
 class DuplicateExecutionError(CAGEError, RuntimeError):
     """Raised when a Consequence is already reserved for execution."""
