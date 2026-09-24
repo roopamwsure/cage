@@ -29,6 +29,9 @@ For portable JSON Warrants and CLI inspection, see the
 [portable Warrant guide](docs/portable-warrants-and-cli.md).
 For the meaning of Decisions, execution observations, and Effects, see the
 [semantic guide](docs/semantic-guide.md).
+For proposed changes and security reports, see
+[CONTRIBUTING.md](CONTRIBUTING.md) and [SECURITY.md](SECURITY.md). Development
+changes are summarized in the [changelog](CHANGELOG.md).
 
 Current release:
 
