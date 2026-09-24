@@ -20,6 +20,9 @@ Those systems may become assurance inputs, adapters, evidence sources, execution
 The v0.7 developer SDK is under development on the feature branch. To run its
 local SQLite example from a source checkout, see the
 [v0.7 Quickstart](docs/quickstart.md).
+See the [integration guide](docs/integration-guide.md) for adapter, verifier,
+failure-recovery, and trust-boundary guidance, and the
+[release readiness review](docs/v0.7-release-readiness.md) for remaining gates.
 
 Current release:
 
