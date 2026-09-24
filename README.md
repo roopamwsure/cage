@@ -17,6 +17,8 @@ Those systems may become assurance inputs, adapters, evidence sources, execution
 
 ## Status
 
+The source code is licensed under [Apache License 2.0](LICENSE).
+
 The v0.7 developer SDK is under development on the feature branch. To run its
 local SQLite example from a source checkout, see the
 [v0.7 Quickstart](docs/quickstart.md).
