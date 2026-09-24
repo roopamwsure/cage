@@ -2,10 +2,18 @@
 
 import argparse
 from importlib.metadata import version
+import json
 import sys
 
 from cage.errors import WarrantFormatError, WarrantIOError
 from cage.warrants import load_warrant, validate_warrant
+
+
+def _display_id(value: str | None) -> str:
+    """Escape control characters in identifiers displayed in a terminal."""
+    if value is None:
+        return "none"
+    return json.dumps(value, ensure_ascii=True)[1:-1]
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -49,12 +57,12 @@ def main(argv: list[str] | None = None) -> int:
         report = validate_warrant(document)
         if args.operation == "inspect":
             data = document.to_dict()
-            print(f"Warrant ID: {document.warrant_id}")
-            print(f"Consequence ID: {document.consequence_id}")
-            print(f"Previous Warrant ID: {document.previous_warrant_id or 'none'}")
+            print(f"Warrant ID: {_display_id(document.warrant_id)}")
+            print(f"Consequence ID: {_display_id(document.consequence_id)}")
+            print(f"Previous Warrant ID: {_display_id(document.previous_warrant_id)}")
             print(f"Decision: {document.decision_state.value}")
             print(f"Effect: {document.effect_state.value if document.effect_state else 'none'}")
-            print(f"Execution attempt ID: {document.execution_attempt_id or 'none'}")
+            print(f"Execution attempt ID: {_display_id(document.execution_attempt_id)}")
             print(f"Adapter: {data['adapter_result']['state'] if data['adapter_result'] else 'none'}")
             print(f"Verification: {data['verification']['state'] if data['verification'] else 'none'}")
             print(f"Disclosure: {document.disclosure.value}")

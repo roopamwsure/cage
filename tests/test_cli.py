@@ -6,6 +6,7 @@ import tomllib
 
 from cage import CAGE, DecisionState, EvaluationOutcome
 from cage.cli import main
+from cage.identifiers import EvaluationIds
 from cage.warrants import dump_warrant, export_warrant, load_warrant
 
 
@@ -31,6 +32,27 @@ def test_inspect_prints_lifecycle_metadata_without_private_values(tmp_path, caps
     assert "Observation origin: none" in output.out
     assert "Warrant ID: " in output.out
     assert "private" not in output.out + output.err
+
+
+def test_inspect_escapes_control_characters_in_record_ids(tmp_path, capsys) -> None:
+    cage = CAGE(rule=lambda *args: EvaluationOutcome(state=DecisionState.ADMITTED))
+    action = cage.inputs.action(
+        action_type="database.delete", principal_id="principal",
+        agent_id="agent", resource_id="record", requested_effect={"record_id": 1},
+    )
+    evaluation = cage.evaluate(
+        action=action, idempotency_key="key",
+        ids=EvaluationIds(warrant_id="warrant\nDecision: refused\x1b[31m"),
+    )
+    path = tmp_path / "warrant.json"
+    dump_warrant(export_warrant(evaluation), path)
+
+    assert main(["warrant", "inspect", str(path)]) == 0
+    output = capsys.readouterr()
+    assert "Warrant ID: warrant\\nDecision: refused\\u001b[31m" in output.out
+    assert "\nDecision: refused" not in output.out
+    assert "\x1b" not in output.out
+    assert "Decision: admitted" in output.out
 
 
 def test_validate_reports_disclosure_and_structural_result(tmp_path, capsys) -> None:

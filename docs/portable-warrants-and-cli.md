@@ -35,8 +35,9 @@ does not contain that earlier snapshot.
 
 `inspect` prints identifiers, Decision and Effect states, adapter and
 verification states, disclosure, origin, and unresolved lineage warnings.
-It does not print action parameters or reference values by default, even
-when the file was exported as FULL. Identifiers and action types may
+It escapes control characters in displayed identifiers. It does not print
+action parameters or reference values by default, even when the file was
+exported as FULL. Identifiers and action types may
 themselves reveal information if an application assigns sensitive values.
 `validate` reports structural validity, disclosed omissions, and warnings;
 it does not verify that a target system changed, remains changed, or that
