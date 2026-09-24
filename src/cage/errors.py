@@ -26,6 +26,10 @@ class CAGEValueError(CAGEError, ValueError):
     """Raised when an SDK argument has an invalid value."""
 
 
+class WarrantExportError(CAGEValueError):
+    """Raised when a native Warrant cannot be safely exported."""
+
+
 class IdentifierGenerationError(CAGEError):
     """Raised when a configured identifier factory cannot produce an ID."""
 
