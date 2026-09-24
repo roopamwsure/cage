@@ -11,7 +11,9 @@ from cage.errors import (
     CAGETypeError, UnsupportedWarrantVersionError,
     WarrantExportError, WarrantFormatError,
 )
-from cage.warrants import WarrantDisclosure, export_warrant, parse_warrant
+from cage.warrants import (
+    WarrantDisclosure, export_warrant, parse_warrant, validate_warrant,
+)
 
 
 def _assurance(*, state=VerificationState.VERIFIED_BOUND):
@@ -223,6 +225,83 @@ def test_parse_rejects_deep_record_and_nonfinite_overflow() -> None:
     encoded = export_warrant(_assurance(), disclosure=WarrantDisclosure.FULL).to_json()
     with pytest.raises(WarrantFormatError):
         parse_warrant(encoded.replace('"reference_count": 1', '"reference_count": 1e999', 1))
+
+
+def test_validation_reports_structural_failure_without_raising() -> None:
+    payload = export_warrant(_assurance()).to_dict()
+    payload["effect"]["state"] = "no_bind"
+    report = validate_warrant(json.dumps(payload))
+    assert report.structurally_valid is False
+    assert report.disclosure is WarrantDisclosure.SUMMARY
+    assert report.issues == (
+        report.issues[0],
+    )
+    assert report.issues[0].severity == "error"
+    assert report.issues[0].code == "invalid_format"
+    assert report.issues[0].path == "effect.state"
+    assert "states" in report.issues[0].message
+
+
+def test_validation_identifies_unsupported_format_without_disclosure() -> None:
+    payload = export_warrant(_assurance()).to_dict()
+    payload["format_version"] = "2"
+    report = validate_warrant(json.dumps(payload))
+    assert report.structurally_valid is False
+    assert report.disclosure is None
+    assert report.issues[0].code == "unsupported_version"
+    assert report.issues[0].path == "format_version"
+
+
+def test_valid_summary_reports_hidden_references_and_unresolved_predecessor() -> None:
+    document = export_warrant(_assurance())
+    report = validate_warrant(document)
+    assert report.structurally_valid is True
+    assert report.disclosure is WarrantDisclosure.SUMMARY
+    assert all(issue.severity == "warning" for issue in report.issues)
+    assert {issue.code for issue in report.issues} >= {
+        "hidden_references", "unresolved_predecessor",
+    }
+    assert any(issue.path == "warrant.previous_warrant_id" for issue in report.issues)
+
+
+def test_full_decision_only_warrant_has_no_hidden_reference_warning() -> None:
+    cage = CAGE(rule=lambda *args: EvaluationOutcome(state=DecisionState.ADMITTED))
+    action = cage.inputs.action(
+        action_type="database.delete", principal_id="p", agent_id="a",
+        resource_id="r", requested_effect={},
+    )
+    document = export_warrant(cage.evaluate(action=action, idempotency_key="k"),
+                              disclosure=WarrantDisclosure.FULL)
+    report = validate_warrant(document.to_json())
+    assert report.structurally_valid is True
+    assert report.disclosure is WarrantDisclosure.FULL
+    assert report.issues == ()
+
+
+def test_validation_rejects_only_invalid_api_argument_type() -> None:
+    with pytest.raises(CAGETypeError):
+        validate_warrant(123)
+    report = validate_warrant(b"\xff")
+    assert report.structurally_valid is False
+    assert report.disclosure is None
+
+
+def test_validation_warns_for_recorded_execution_after_held_decision() -> None:
+    assurance = _assurance()
+    held = replace(assurance.decision, state=DecisionState.HELD)
+    execution_attempt = replace(assurance.execution_attempt, decision=held)
+    adapter = replace(assurance.adapter_result, execution_attempt=execution_attempt)
+    verification = replace(assurance.verification, adapter_result=adapter)
+    proof = replace(assurance.effect_proof, verification=verification)
+    warrant = replace(
+        assurance.warrant,
+        decision_proof=replace(assurance.decision_proof, decision=held),
+        effect_proof=proof,
+    )
+    report = validate_warrant(export_warrant(warrant))
+    assert report.structurally_valid is True
+    assert any(issue.code == "ineligible_execution" and issue.path == "decision.state"
+               for issue in report.issues)
 
 
 def test_decision_only_summary_discloses_omissions_without_leaking_inputs() -> None:

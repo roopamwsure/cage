@@ -538,3 +538,99 @@ def parse_warrant(data: str | bytes) -> PortableWarrant:
         raise WarrantFormatError("invalid UTF-8 JSON Warrant") from error
     except WarrantExportError as error:
         raise WarrantFormatError(str(error)) from error
+
+
+@dataclass(frozen=True, slots=True)
+class ValidationIssue:
+    severity: str
+    code: str
+    path: str
+    message: str
+
+
+@dataclass(frozen=True, slots=True)
+class WarrantValidationReport:
+    structurally_valid: bool
+    disclosure: WarrantDisclosure | None
+    issues: tuple[ValidationIssue, ...]
+
+
+def _error_location(error: WarrantFormatError) -> tuple[str, str, str]:
+    if isinstance(error, UnsupportedWarrantVersionError):
+        return ("unsupported_version", "format_version", "unsupported portable Warrant format version")
+    message = str(error)
+    if "verification and effect states" in message:
+        return ("invalid_format", "effect.state", "verification and effect states do not agree")
+    if "omitted_fields" in message:
+        return ("invalid_format", "disclosure.omitted_fields", "disclosure.omitted_fields does not match the profile")
+    if "duplicate JSON key" in message:
+        return ("duplicate_key", "$", "JSON object contains a duplicate key")
+    if "8 MiB" in message:
+        return ("size_limit", "$", "portable Warrant exceeds the 8 MiB limit")
+    if "depth" in message:
+        return ("depth_limit", "$", "portable Warrant exceeds the nesting depth limit")
+    if "UTF-8" in message:
+        return ("invalid_json", "$", "invalid UTF-8 JSON Warrant")
+    if "missing fields" in message or "unknown fields" in message:
+        return ("invalid_format", "$", "portable Warrant contains missing or unknown fields")
+    if "does not match" in message:
+        return ("invalid_format", "$", "portable Warrant contains a mismatched identifier")
+    return ("invalid_format", "$", "portable Warrant has invalid fields or inconsistent values")
+
+
+def validate_warrant(data: str | bytes | PortableWarrant) -> WarrantValidationReport:
+    """Check representation consistency, not authenticity or external effects."""
+    if not isinstance(data, (str, bytes, PortableWarrant)):
+        raise CAGETypeError("data must be str, bytes, or PortableWarrant")
+    try:
+        document = parse_warrant(data.to_json(indent=None) if isinstance(data, PortableWarrant) else data)
+    except (WarrantFormatError, WarrantExportError, CAGEValueError, UnicodeError) as error:
+        if isinstance(error, WarrantFormatError):
+            code, path, message = _error_location(error)
+        else:
+            code, path, message = "invalid_format", "$", "portable Warrant cannot be serialized"
+        disclosure = None
+        if code not in {
+            "unsupported_version", "size_limit", "depth_limit",
+            "invalid_json", "duplicate_key",
+        }:
+            # A malformed record may still disclose a recognizable profile.
+            try:
+                raw = data.to_dict() if isinstance(data, PortableWarrant) else json.loads(data)
+                profile = raw.get("disclosure", {}).get("profile")
+                if profile in ("summary", "full"):
+                    disclosure = WarrantDisclosure(profile)
+            except (TypeError, ValueError, AttributeError, UnicodeError, RecursionError):
+                pass
+        return WarrantValidationReport(False, disclosure, (
+            ValidationIssue("error", code, path, message),
+        ))
+
+    payload = document.to_dict()
+    issues: list[ValidationIssue] = []
+    if document.disclosure is WarrantDisclosure.SUMMARY and payload["verification"] is not None:
+        issues.append(ValidationIssue(
+            "warning", "hidden_references", "verification.references",
+            "summary hides reference contents; reference equality cannot be checked",
+        ))
+    for path, value in (
+        ("warrant.previous_warrant_id", payload["warrant"]["previous_warrant_id"]),
+        ("evaluation_attempt.previous_attempt_id", payload["evaluation_attempt"]["previous_attempt_id"]),
+        ("execution_attempt.previous_execution_attempt_id", (
+            payload["execution_attempt"]["previous_execution_attempt_id"]
+            if payload["execution_attempt"] is not None else None
+        )),
+    ):
+        if value is not None:
+            issues.append(ValidationIssue(
+                "warning", "unresolved_predecessor", path,
+                "predecessor is not bundled in this document",
+            ))
+    if payload["execution_attempt"] is not None and document.decision_state not in (
+        DecisionState.ADMITTED, DecisionState.NARROWED,
+    ):
+        issues.append(ValidationIssue(
+            "warning", "ineligible_execution", "decision.state",
+            "record asserts execution after an ineligible decision",
+        ))
+    return WarrantValidationReport(True, document.disclosure, tuple(issues))
