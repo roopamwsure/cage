@@ -6,7 +6,7 @@ import tomllib
 
 from cage import CAGE, DecisionState, EvaluationOutcome
 from cage.cli import main
-from cage.warrants import dump_warrant, export_warrant
+from cage.warrants import dump_warrant, export_warrant, load_warrant
 
 
 def _warrant_file(path: Path) -> None:
@@ -71,3 +71,41 @@ def test_module_entrypoint_help_version_and_argument_errors() -> None:
         )
         assert result.returncode == code
         assert fragment in result.stdout + result.stderr
+
+
+def test_database_delete_example_exports_summary_warrant(tmp_path, capsys) -> None:
+    destination = tmp_path / "delete-warrant.json"
+    assert main(["example", "database.delete", "--warrant", str(destination)]) == 0
+    output = capsys.readouterr()
+    assert "Decision: admitted" in output.out
+    assert "Adapter: acknowledged" in output.out
+    assert "Verification: verified_bound" in output.out
+    assert "Effect: bound" in output.out
+    assert output.err == ""
+    document = load_warrant(destination)
+    assert document.disclosure.value == "summary"
+    assert document.effect_state.value == "bound"
+    assert document.observation_origin == "adapter"
+    assert document.to_dict()["action"]["requested_effect"]["parameters"] is None
+
+
+def test_example_refuses_existing_destination_without_replacing(tmp_path, capsys) -> None:
+    destination = tmp_path / "existing.json"
+    destination.write_text("original", encoding="utf-8")
+    assert main(["example", "database.delete", "--warrant", str(destination)]) == 1
+    output = capsys.readouterr()
+    assert "Could not read or write" in output.err
+    assert "Traceback" not in output.err
+    assert destination.read_text(encoding="utf-8") == "original"
+
+
+def test_module_entrypoint_runs_example_without_source_script(tmp_path) -> None:
+    destination = tmp_path / "warrant.json"
+    result = subprocess.run(
+        [sys.executable, "-m", "cage.cli", "example", "database.delete",
+         "--warrant", str(destination)],
+        cwd=tmp_path, capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "Effect: bound" in result.stdout
+    assert load_warrant(destination).effect_state.value == "bound"

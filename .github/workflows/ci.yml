@@ -89,6 +89,15 @@ jobs:
           command = environment / 'bin' / 'cage'
           for args in (('--version',), ('warrant', '--help')):
               subprocess.run([str(command), *args], cwd=environment, check=True)
+          warrant = environment / 'delete-warrant.json'
+          subprocess.run(
+              [str(command), 'example', 'database.delete', '--warrant', str(warrant)],
+              cwd=environment, check=True,
+          )
+          subprocess.run(
+              [str(command), 'warrant', 'validate', str(warrant)],
+              cwd=environment, check=True,
+          )
           for name in ('sqlite_delete.py', 'sqlite_reconcile.py'):
               script = environment / 'share' / 'cage-assurance' / 'examples' / name
               assert script.is_file(), script

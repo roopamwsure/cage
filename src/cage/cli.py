@@ -1,4 +1,4 @@
-"""Read-only commands for inspecting portable CAGE Warrants."""
+"""Local CAGE examples and portable Warrant inspection commands."""
 
 import argparse
 from importlib.metadata import version
@@ -10,10 +10,15 @@ from cage.warrants import load_warrant, validate_warrant
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="cage", description="Inspect and validate portable CAGE Warrants."
+        prog="cage", description="Run local examples and inspect portable Warrants."
     )
     parser.add_argument("--version", action="version", version=f"cage {version('cage-assurance')}")
     command = parser.add_subparsers(dest="command", required=True)
+    example = command.add_parser("example", help="Run a disposable local example")
+    examples = example.add_subparsers(dest="scenario", required=True)
+    examples.add_parser("database.delete", help="Delete a record in local SQLite").add_argument(
+        "--warrant", metavar="PATH", help="Write a SUMMARY portable Warrant"
+    )
     warrant = command.add_parser("warrant", help="Read a portable Warrant")
     operation = warrant.add_subparsers(dest="operation", required=True)
     for name in ("inspect", "validate"):
@@ -25,6 +30,11 @@ def main(argv: list[str] | None = None) -> int:
     """Return documented CLI exit codes; argparse handles usage errors."""
     args = _parser().parse_args(argv)
     try:
+        if args.command == "example":
+            from cage._sqlite_example import main as sqlite_delete
+
+            sqlite_delete(warrant_path=args.warrant)
+            return 0
         document = load_warrant(args.path)
         report = validate_warrant(document)
         if args.operation == "inspect":
@@ -52,7 +62,7 @@ def main(argv: list[str] | None = None) -> int:
         print("Invalid portable Warrant record.", file=sys.stderr)
         return 2
     except WarrantIOError:
-        print("Could not read portable Warrant file.", file=sys.stderr)
+        print("Could not read or write portable Warrant file.", file=sys.stderr)
         return 1
     except Exception:
         print("Could not complete Warrant command.", file=sys.stderr)

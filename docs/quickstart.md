@@ -20,6 +20,17 @@ If you already have this repository installed in an active virtual environment,
 run only the final command. This example does not require a network service or
 credentials. It uses Python's standard-library `sqlite3` module.
 
+With the v0.7 feature branch installed, the same disposable fixture can be run
+from any directory through the `cage` command:
+
+```powershell
+cage example database.delete
+cage example database.delete --warrant .\delete-warrant.json
+```
+
+The optional file contains the final assurance snapshot with SUMMARY disclosure.
+The command refuses to overwrite an existing file.
+
 The output has these states; the Warrant ID varies per run:
 
 ```text
@@ -50,8 +61,8 @@ After your application has exported a Warrant with `dump_warrant()` from
 `cage.warrants`, inspect its lifecycle metadata and check its file structure:
 
 ```powershell
-cage warrant inspect .\assurance-warrant.json
-cage warrant validate .\assurance-warrant.json
+cage warrant inspect .\delete-warrant.json
+cage warrant validate .\delete-warrant.json
 ```
 
 `inspect` shows lifecycle IDs and states without printing business payloads or
