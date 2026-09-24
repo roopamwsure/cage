@@ -1,4 +1,5 @@
 from dataclasses import replace
+import json
 
 import pytest
 
@@ -6,8 +7,11 @@ from cage import CAGE, DecisionState, EvaluationOutcome, ExecutionCapability
 from cage.core.adapter import AdapterExecutionResult, AdapterExecutionState
 from cage.core.verification import EffectVerificationResult, VerificationState
 from cage.core.warrant import Warrant
-from cage.errors import CAGETypeError, WarrantExportError
-from cage.warrants import WarrantDisclosure, export_warrant
+from cage.errors import (
+    CAGETypeError, UnsupportedWarrantVersionError,
+    WarrantExportError, WarrantFormatError,
+)
+from cage.warrants import WarrantDisclosure, export_warrant, parse_warrant
 
 
 def _assurance(*, state=VerificationState.VERIFIED_BOUND):
@@ -124,6 +128,101 @@ def test_assured_export_rejects_cross_decision_path_in_raw_warrant() -> None:
     )
     with pytest.raises(WarrantExportError, match="decision"):
         export_warrant(inconsistent)
+
+
+@pytest.mark.parametrize("disclosure", list(WarrantDisclosure))
+def test_parse_roundtrip_preserves_detached_assurance(disclosure) -> None:
+    original = export_warrant(_assurance(), disclosure=disclosure)
+    parsed = parse_warrant(original.to_json().encode("utf-8"))
+    assert parsed.to_dict() == original.to_dict()
+    assert parsed.warrant_id == original.warrant_id
+    assert parsed.observation_origin == "adapter"
+    parsed_dict = parsed.to_dict()
+    parsed_dict["warrant"]["warrant_id"] = "changed"
+    assert parsed.warrant_id == original.warrant_id
+
+
+def test_parse_decision_only_record_has_no_effect_or_execution() -> None:
+    cage = CAGE(rule=lambda *args: EvaluationOutcome(state=DecisionState.ADMITTED))
+    action = cage.inputs.action(
+        action_type="database.delete", principal_id="p", agent_id="a",
+        resource_id="r", requested_effect={"id": 1},
+    )
+    evaluation = cage.evaluate(action=action, idempotency_key="key")
+    original = export_warrant(evaluation)
+    parsed = parse_warrant(original.to_json())
+    assert parsed.to_dict() == original.to_dict()
+    assert parsed.effect_state is None
+    assert parsed.observation_origin is None
+
+
+def test_parse_rejects_duplicate_keys_and_nonfinite_numbers() -> None:
+    document = export_warrant(_assurance()).to_dict()
+    encoded = json.dumps(document)
+    with pytest.raises(WarrantFormatError, match="duplicate"):
+        parse_warrant(encoded.replace('"format": "cage.warrant",',
+                                      '"format": "cage.warrant", "format": "cage.warrant",', 1))
+    with pytest.raises(WarrantFormatError, match="nonfinite"):
+        parse_warrant(encoded.replace('"reference_count": 1', '"reference_count": NaN', 1))
+
+
+def test_parse_rejects_unsupported_version_and_unknown_fields() -> None:
+    payload = export_warrant(_assurance()).to_dict()
+    payload["format_version"] = "2"
+    with pytest.raises(UnsupportedWarrantVersionError):
+        parse_warrant(json.dumps(payload))
+    payload["format_version"] = "1"
+    payload["action"]["unexpected"] = "secret"
+    with pytest.raises(WarrantFormatError, match="unknown"):
+        parse_warrant(json.dumps(payload))
+
+
+def test_parse_rejects_wrong_links_and_undisclosed_omission() -> None:
+    payload = export_warrant(_assurance()).to_dict()
+    payload["execution_attempt"]["decision_id"] = "different"
+    with pytest.raises(WarrantFormatError, match="decision_id"):
+        parse_warrant(json.dumps(payload))
+    payload = export_warrant(_assurance()).to_dict()
+    payload["disclosure"]["omitted_fields"] = []
+    with pytest.raises(WarrantFormatError, match="omitted_fields"):
+        parse_warrant(json.dumps(payload))
+
+
+def test_parse_rejects_invalid_utf8_and_oversized_input() -> None:
+    with pytest.raises(WarrantFormatError, match="UTF-8"):
+        parse_warrant(b"\xff")
+    with pytest.raises(WarrantFormatError, match="8 MiB"):
+        parse_warrant(b" " * (8 * 1024 * 1024 + 1))
+    with pytest.raises(CAGETypeError):
+        parse_warrant({})
+
+
+def test_parse_rejects_conflicting_effect_states_and_reference_counts() -> None:
+    payload = export_warrant(_assurance(), disclosure=WarrantDisclosure.FULL).to_dict()
+    payload["effect"]["state"] = "no_bind"
+    with pytest.raises(WarrantFormatError, match="states"):
+        parse_warrant(json.dumps(payload))
+    payload = export_warrant(_assurance(), disclosure=WarrantDisclosure.FULL).to_dict()
+    payload["verification"]["reference_count"] = 3
+    with pytest.raises(WarrantFormatError, match="count"):
+        parse_warrant(json.dumps(payload))
+    payload = export_warrant(_assurance()).to_dict()
+    payload["decision_proof"]["reference_counts"]["evidence"] = True
+    with pytest.raises(WarrantFormatError, match="nonnegative integer"):
+        parse_warrant(json.dumps(payload))
+
+
+def test_parse_rejects_deep_record_and_nonfinite_overflow() -> None:
+    payload = export_warrant(_assurance(), disclosure=WarrantDisclosure.FULL).to_dict()
+    nested: object = "value"
+    for _ in range(65):
+        nested = [nested]
+    payload["action"]["requested_effect"]["parameters"] = {"nested": nested}
+    with pytest.raises(WarrantFormatError, match="depth"):
+        parse_warrant(json.dumps(payload))
+    encoded = export_warrant(_assurance(), disclosure=WarrantDisclosure.FULL).to_json()
+    with pytest.raises(WarrantFormatError):
+        parse_warrant(encoded.replace('"reference_count": 1', '"reference_count": 1e999', 1))
 
 
 def test_decision_only_summary_discloses_omissions_without_leaking_inputs() -> None:

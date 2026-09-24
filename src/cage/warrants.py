@@ -9,7 +9,10 @@ from cage.core._json import freeze_json_value
 from cage.core.decision import DecisionState
 from cage.core.effect import EffectState
 from cage.core.warrant import Warrant
-from cage.errors import CAGETypeError, CAGEValueError, WarrantExportError
+from cage.errors import (
+    CAGETypeError, CAGEValueError, UnsupportedWarrantVersionError,
+    WarrantExportError, WarrantFormatError,
+)
 from cage.results import AssuranceResult, EvaluationResult, ExecutionObservationOrigin
 
 
@@ -266,3 +269,272 @@ def export_warrant(
     except (TypeError, ValueError, RecursionError, UnicodeError) as error:
         raise WarrantExportError("Warrant contains unsupported JSON data") from error
     return document
+
+
+def _unique_pairs(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    result: dict[str, object] = {}
+    for key, value in pairs:
+        if key in result:
+            raise WarrantFormatError(f"duplicate JSON key: {key}")
+        result[key] = value
+    return result
+
+
+def _nonfinite(value: str) -> object:
+    raise WarrantFormatError(f"nonfinite JSON number: {value}")
+
+
+def _object(value: object, path: str, fields: set[str]) -> dict[str, object]:
+    if not isinstance(value, dict):
+        raise WarrantFormatError(f"{path} must be an object")
+    extra = value.keys() - fields
+    if extra:
+        raise WarrantFormatError(f"{path} has unknown fields: {', '.join(sorted(extra))}")
+    missing = fields - value.keys()
+    if missing:
+        raise WarrantFormatError(f"{path} missing fields: {', '.join(sorted(missing))}")
+    return value
+
+
+def _id(value: object, path: str, *, nullable: bool = False) -> None:
+    if nullable and value is None:
+        return
+    if not isinstance(value, str) or not value.strip():
+        raise WarrantFormatError(f"{path} must be a nonblank string")
+
+
+def _refs(value: object, path: str, *, summary: bool) -> int | None:
+    if summary and value is None:
+        return None
+    if not isinstance(value, list):
+        raise WarrantFormatError(f"{path} must be an array")
+    for item in value:
+        _id(item, path)
+    return len(value)
+
+
+def _count(value: object, path: str) -> None:
+    if type(value) is not int or value < 0:
+        raise WarrantFormatError(f"{path} must be a nonnegative integer")
+
+
+def _link(value: object, target: object, path: str) -> None:
+    if value != target:
+        raise WarrantFormatError(f"{path} does not match its target")
+
+
+def _validate_decoded(data: object) -> None:
+    root = _object(data, "warrant document", {
+        "format", "format_version", "disclosure", "warrant", "consequence", "action",
+        "evaluation_attempt", "decision", "decision_proof", "execution_attempt",
+        "adapter_result", "verification", "effect", "effect_proof",
+    })
+    if root["format"] != "cage.warrant":
+        raise WarrantFormatError("format must be cage.warrant")
+    if root["format_version"] != "1":
+        raise UnsupportedWarrantVersionError("unsupported portable Warrant format version")
+    disclosure = _object(root["disclosure"], "disclosure", {"profile", "omitted_fields"})
+    if disclosure["profile"] not in ("summary", "full"):
+        raise WarrantFormatError("invalid disclosure profile")
+    summary = disclosure["profile"] == "summary"
+    omitted = disclosure["omitted_fields"]
+    if not isinstance(omitted, list) or any(not isinstance(x, str) for x in omitted):
+        raise WarrantFormatError("disclosure.omitted_fields must be an array of strings")
+
+    warrant = _object(root["warrant"], "warrant", {
+        "warrant_id", "schema_version", "previous_warrant_id",
+    })
+    for name in ("warrant_id", "schema_version"):
+        _id(warrant[name], "warrant." + name)
+    _id(warrant["previous_warrant_id"], "warrant.previous_warrant_id", nullable=True)
+    if warrant["previous_warrant_id"] == warrant["warrant_id"]:
+        raise WarrantFormatError("warrant cannot link to itself")
+    consequence = _object(root["consequence"], "consequence", {
+        "consequence_id", "action_id", "idempotency_key",
+    })
+    action = _object(root["action"], "action", {
+        "action_id", "action_type", "principal_id", "agent_id", "resource_id", "requested_effect",
+    })
+    for obj, names, path in (
+        (consequence, ("consequence_id", "action_id"), "consequence"),
+        (action, ("action_id", "action_type"), "action"),
+    ):
+        for name in names:
+            _id(obj[name], path + "." + name)
+    _link(consequence["action_id"], action["action_id"], "consequence.action_id")
+    omitted_expected = [
+        "consequence.idempotency_key", "action.principal_id", "action.agent_id",
+        "action.resource_id", "action.requested_effect.parameters",
+    ] if summary else []
+    for obj, fields, path in (
+        (consequence, ("idempotency_key",), "consequence"),
+        (action, ("principal_id", "agent_id", "resource_id"), "action"),
+    ):
+        for name in fields:
+            _id(obj[name], path + "." + name, nullable=summary)
+            if summary and obj[name] is not None:
+                raise WarrantFormatError(path + "." + name + " must be omitted")
+    requested = _object(action["requested_effect"], "action.requested_effect", {"parameters"})
+    _parameters(requested["parameters"], "action.requested_effect.parameters", summary)
+
+    attempt = _object(root["evaluation_attempt"], "evaluation_attempt", {
+        "attempt_id", "consequence_id", "previous_attempt_id",
+    })
+    _id(attempt["attempt_id"], "evaluation_attempt.attempt_id")
+    _id(attempt["consequence_id"], "evaluation_attempt.consequence_id")
+    _id(attempt["previous_attempt_id"], "evaluation_attempt.previous_attempt_id", nullable=True)
+    _link(attempt["consequence_id"], consequence["consequence_id"], "evaluation_attempt.consequence_id")
+    if attempt["attempt_id"] == attempt["previous_attempt_id"]:
+        raise WarrantFormatError("evaluation_attempt cannot link to itself")
+
+    decision = _object(root["decision"], "decision", {
+        "decision_id", "attempt_id", "state", "permitted_effect",
+    })
+    _id(decision["decision_id"], "decision.decision_id")
+    _link(decision["attempt_id"], attempt["attempt_id"], "decision.attempt_id")
+    if decision["state"] not in tuple(state.value for state in DecisionState):
+        raise WarrantFormatError("invalid decision state")
+    if decision["state"] == DecisionState.NARROWED:
+        permitted = _object(decision["permitted_effect"], "decision.permitted_effect", {"parameters"})
+        _parameters(permitted["parameters"], "decision.permitted_effect.parameters", summary)
+        if summary:
+            omitted_expected.append("decision.permitted_effect.parameters")
+    elif decision["permitted_effect"] is not None:
+        raise WarrantFormatError("permitted_effect is only valid for narrowed decisions")
+
+    proof = _object(root["decision_proof"], "decision_proof", {
+        "proof_id", "decision_id", "evidence_refs", "standing_refs",
+        "delegation_refs", "approval_refs", "context_refs", "reference_counts",
+    })
+    _id(proof["proof_id"], "decision_proof.proof_id")
+    _link(proof["decision_id"], decision["decision_id"], "decision_proof.decision_id")
+    counts = _object(proof["reference_counts"], "decision_proof.reference_counts", {
+        "evidence", "standing", "delegation", "approval", "context",
+    })
+    for name in ("evidence", "standing", "delegation", "approval", "context"):
+        path = "decision_proof." + name + "_refs"
+        length = _refs(proof[name + "_refs"], path, summary=summary)
+        _count(counts[name], "decision_proof.reference_counts." + name)
+        if length is not None and length != counts[name]:
+            raise WarrantFormatError(path + " count mismatch")
+        if summary:
+            if length is not None:
+                raise WarrantFormatError(path + " must be omitted")
+            omitted_expected.append(path)
+
+    lifecycle = [root[name] for name in (
+        "execution_attempt", "adapter_result", "verification", "effect", "effect_proof",
+    )]
+    if any(item is None for item in lifecycle) and any(item is not None for item in lifecycle):
+        raise WarrantFormatError("partial execution path is invalid")
+    if all(item is not None for item in lifecycle):
+        _validate_assured(root, summary, omitted_expected)
+    if omitted != omitted_expected:
+        raise WarrantFormatError("disclosure.omitted_fields does not match the profile")
+
+
+def _parameters(value: object, path: str, summary: bool) -> None:
+    if summary and value is None:
+        return
+    if not isinstance(value, dict):
+        raise WarrantFormatError(path + " must be an object")
+    if summary:
+        raise WarrantFormatError(path + " must be omitted")
+
+
+def _validate_assured(root: dict[str, object], summary: bool, omitted: list[str]) -> None:
+    execution = _object(root["execution_attempt"], "execution_attempt", {
+        "execution_attempt_id", "decision_id", "previous_execution_attempt_id",
+    })
+    adapter = _object(root["adapter_result"], "adapter_result", {
+        "result_id", "execution_attempt_id", "state", "origin", "references", "reference_count",
+    })
+    verification = _object(root["verification"], "verification", {
+        "verification_id", "adapter_result_id", "state", "references", "reference_count",
+    })
+    effect = _object(root["effect"], "effect", {
+        "effect_id", "consequence_id", "state", "verification_refs", "verification_ref_count",
+    })
+    proof = _object(root["effect_proof"], "effect_proof", {
+        "proof_id", "effect_id", "verification_id",
+    })
+    for obj, names, path in (
+        (execution, ("execution_attempt_id",), "execution_attempt"),
+        (adapter, ("result_id",), "adapter_result"),
+        (verification, ("verification_id",), "verification"),
+        (effect, ("effect_id",), "effect"),
+        (proof, ("proof_id",), "effect_proof"),
+    ):
+        for name in names:
+            _id(obj[name], path + "." + name)
+    _id(execution["previous_execution_attempt_id"], "execution_attempt.previous_execution_attempt_id", nullable=True)
+    if execution["previous_execution_attempt_id"] == execution["execution_attempt_id"]:
+        raise WarrantFormatError("execution_attempt cannot link to itself")
+    for value, target, path in (
+        (execution["decision_id"], root["decision"]["decision_id"], "execution_attempt.decision_id"),
+        (adapter["execution_attempt_id"], execution["execution_attempt_id"], "adapter_result.execution_attempt_id"),
+        (verification["adapter_result_id"], adapter["result_id"], "verification.adapter_result_id"),
+        (effect["consequence_id"], root["consequence"]["consequence_id"], "effect.consequence_id"),
+        (proof["effect_id"], effect["effect_id"], "effect_proof.effect_id"),
+        (proof["verification_id"], verification["verification_id"], "effect_proof.verification_id"),
+    ):
+        _link(value, target, path)
+    if adapter["state"] not in ("acknowledged", "rejected", "error", "unknown"):
+        raise WarrantFormatError("invalid adapter state")
+    if adapter["origin"] not in ("adapter", "sdk_recovery", "unspecified"):
+        raise WarrantFormatError("invalid adapter origin")
+    states = {
+        "verified_bound": "bound", "verified_no_bind": "no_bind",
+        "inconclusive": "effect_unknown",
+    }
+    if verification["state"] not in states or effect["state"] != states[verification["state"]]:
+        raise WarrantFormatError("verification and effect states do not agree")
+    lengths = []
+    for obj, key, count_key, path in (
+        (adapter, "references", "reference_count", "adapter_result.references"),
+        (verification, "references", "reference_count", "verification.references"),
+        (effect, "verification_refs", "verification_ref_count", "effect.verification_refs"),
+    ):
+        length = _refs(obj[key], path, summary=summary)
+        _count(obj[count_key], path + " count")
+        if length is not None and length != obj[count_key]:
+            raise WarrantFormatError(path + " count mismatch")
+        if summary:
+            if length is not None:
+                raise WarrantFormatError(path + " must be omitted")
+            omitted.append(path)
+        lengths.append(length)
+    if verification["state"] != "inconclusive" and verification["reference_count"] == 0:
+        raise WarrantFormatError("conclusive verification requires references")
+    if verification["reference_count"] != effect["verification_ref_count"]:
+        raise WarrantFormatError("verification and effect reference counts differ")
+    if not summary and verification["references"] != effect["verification_refs"]:
+        raise WarrantFormatError("verification and effect references differ")
+    if adapter["origin"] == "sdk_recovery":
+        if adapter["state"] != "unknown":
+            raise WarrantFormatError("SDK recovery requires unknown adapter state")
+        if not summary and _RECOVERY_MARKER not in adapter["references"]:
+            raise WarrantFormatError("SDK recovery marker missing")
+    if adapter["origin"] == "adapter" and not summary and _RECOVERY_MARKER in adapter["references"]:
+        raise WarrantFormatError("SDK recovery marker cannot be adapter-issued")
+
+
+def parse_warrant(data: str | bytes) -> PortableWarrant:
+    """Parse a bounded portable record into detached inspection data."""
+    if not isinstance(data, (str, bytes)):
+        raise CAGETypeError("data must be str or bytes")
+    try:
+        encoded = data.encode("utf-8") if isinstance(data, str) else data
+        if len(encoded) > 8 * 1024 * 1024:
+            raise WarrantFormatError("portable Warrant exceeds the 8 MiB limit")
+        value = json.loads(
+            encoded.decode("utf-8"), object_pairs_hook=_unique_pairs,
+            parse_constant=_nonfinite,
+        )
+        _check_depth(value)
+        _validate_decoded(value)
+        return PortableWarrant(value)
+    except (UnicodeError, json.JSONDecodeError, RecursionError, OverflowError) as error:
+        raise WarrantFormatError("invalid UTF-8 JSON Warrant") from error
+    except WarrantExportError as error:
+        raise WarrantFormatError(str(error)) from error

@@ -30,6 +30,14 @@ class WarrantExportError(CAGEValueError):
     """Raised when a native Warrant cannot be safely exported."""
 
 
+class WarrantFormatError(CAGEValueError):
+    """Raised for an invalid portable Warrant representation."""
+
+
+class UnsupportedWarrantVersionError(WarrantFormatError):
+    """Raised for a portable format version this SDK cannot read."""
+
+
 class IdentifierGenerationError(CAGEError):
     """Raised when a configured identifier factory cannot produce an ID."""
 
