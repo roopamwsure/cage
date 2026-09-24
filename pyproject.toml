@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cage-assurance"
-version = "0.6.0"
+version = "0.7.0"
 description = "Control Assurance Governance Evaluation"
 requires-python = ">=3.11"
 license = "Apache-2.0"
@@ -31,6 +31,10 @@ where = ["src"]
 "share/cage-assurance/docs" = [
     "docs/quickstart.md",
     "docs/reconciliation-walkthrough.md",
+    "docs/semantic-guide.md",
+    "docs/integration-guide.md",
+    "docs/failure-and-recovery.md",
+    "docs/portable-warrants-and-cli.md",
 ]
 
 [tool.pytest.ini_options]

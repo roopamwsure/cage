@@ -1,9 +1,9 @@
 # Changelog
 
 This file summarizes released versions and work on the v0.7 feature branch.
-The `[Unreleased]` section is not a published package or a release promise.
+Version 0.7.0 is a release candidate until it is tagged and published.
 
-## [Unreleased] — v0.7 developer product candidate
+## 0.7.0 — Developer Product (release candidate)
 
 ### Added
 

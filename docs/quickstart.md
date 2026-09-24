@@ -20,7 +20,7 @@ If you already have this repository installed in an active virtual environment,
 run only the final command. This example does not require a network service or
 credentials. It uses Python's standard-library `sqlite3` module.
 
-With the v0.7 feature branch installed, the same disposable fixture can be run
+With v0.7 installed, the same disposable fixture can be run
 from any directory through the `cage` command:
 
 ```powershell

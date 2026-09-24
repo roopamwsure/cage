@@ -58,6 +58,10 @@ jobs:
               'examples/simulated_payment_release.py',
               'docs/quickstart.md',
               'docs/reconciliation-walkthrough.md',
+              'docs/semantic-guide.md',
+              'docs/integration-guide.md',
+              'docs/failure-and-recovery.md',
+              'docs/portable-warrants-and-cli.md',
           )
           distributions = tuple(Path('dist').glob('cage_assurance-*'))
           assert len(distributions) == 2, distributions
