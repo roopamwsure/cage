@@ -38,6 +38,10 @@ class UnsupportedWarrantVersionError(WarrantFormatError):
     """Raised for a portable format version this SDK cannot read."""
 
 
+class WarrantIOError(CAGEError, OSError):
+    """Raised when a portable Warrant file cannot be read or written."""
+
+
 class IdentifierGenerationError(CAGEError):
     """Raised when a configured identifier factory cannot produce an ID."""
 

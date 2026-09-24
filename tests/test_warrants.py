@@ -1,5 +1,6 @@
 from dataclasses import replace
 import json
+from pathlib import Path
 
 import pytest
 
@@ -9,10 +10,11 @@ from cage.core.verification import EffectVerificationResult, VerificationState
 from cage.core.warrant import Warrant
 from cage.errors import (
     CAGETypeError, UnsupportedWarrantVersionError,
-    WarrantExportError, WarrantFormatError,
+    WarrantExportError, WarrantFormatError, WarrantIOError,
 )
 from cage.warrants import (
-    WarrantDisclosure, export_warrant, parse_warrant, validate_warrant,
+    WarrantDisclosure, dump_warrant, export_warrant, load_warrant,
+    parse_warrant, validate_warrant,
 )
 
 
@@ -302,6 +304,63 @@ def test_validation_warns_for_recorded_execution_after_held_decision() -> None:
     assert report.structurally_valid is True
     assert any(issue.code == "ineligible_execution" and issue.path == "decision.state"
                for issue in report.issues)
+
+
+def test_dump_load_utf8_roundtrip_outside_current_directory(tmp_path: Path) -> None:
+    document = export_warrant(_assurance(), disclosure=WarrantDisclosure.FULL)
+    destination = tmp_path / "warrant-秘密.json"
+    dump_warrant(document, destination)
+    assert destination.read_bytes() == document.to_json().encode("utf-8")
+    assert load_warrant(destination).to_dict() == document.to_dict()
+
+
+def test_dump_refuses_existing_file_without_overwriting(tmp_path: Path) -> None:
+    document = export_warrant(_assurance())
+    destination = tmp_path / "existing.json"
+    destination.write_text("original", encoding="utf-8")
+    with pytest.raises(WarrantIOError, match="exists"):
+        dump_warrant(document, destination)
+    assert destination.read_text(encoding="utf-8") == "original"
+    dump_warrant(document, destination, overwrite=True)
+    assert load_warrant(destination).to_dict() == document.to_dict()
+
+
+def test_dump_validates_before_replacing_existing_destination(tmp_path: Path) -> None:
+    from cage.warrants import PortableWarrant
+
+    destination = tmp_path / "existing.json"
+    destination.write_text("original", encoding="utf-8")
+    invalid = PortableWarrant({"format": "cage.warrant"})
+    with pytest.raises(WarrantFormatError):
+        dump_warrant(invalid, destination, overwrite=True)
+    assert destination.read_text(encoding="utf-8") == "original"
+
+
+def test_file_errors_are_wrapped_and_missing_parent_is_not_created(tmp_path: Path) -> None:
+    document = export_warrant(_assurance())
+    destination = tmp_path / "missing-parent" / "warrant.json"
+    with pytest.raises(WarrantIOError):
+        dump_warrant(document, destination)
+    assert not destination.parent.exists()
+    with pytest.raises(WarrantIOError):
+        load_warrant(destination)
+
+
+def test_load_preserves_format_errors_and_rejects_invalid_api_types(tmp_path: Path) -> None:
+    malformed = tmp_path / "malformed.json"
+    malformed.write_bytes(b"\xff")
+    with pytest.raises(WarrantFormatError):
+        load_warrant(malformed)
+    with pytest.raises(CAGETypeError):
+        load_warrant(123)
+    with pytest.raises(CAGETypeError):
+        dump_warrant("not-a-document", malformed)
+    with pytest.raises(CAGETypeError):
+        dump_warrant(export_warrant(_assurance()), malformed, overwrite="yes")
+    with pytest.raises(WarrantIOError):
+        load_warrant("bad\x00path")
+    with pytest.raises(WarrantIOError):
+        dump_warrant(export_warrant(_assurance()), "bad\x00path")
 
 
 def test_decision_only_summary_discloses_omissions_without_leaking_inputs() -> None:

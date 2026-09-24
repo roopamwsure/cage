@@ -4,6 +4,9 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 import json
+import os
+from pathlib import Path
+import tempfile
 
 from cage.core._json import freeze_json_value
 from cage.core.decision import DecisionState
@@ -11,7 +14,7 @@ from cage.core.effect import EffectState
 from cage.core.warrant import Warrant
 from cage.errors import (
     CAGETypeError, CAGEValueError, UnsupportedWarrantVersionError,
-    WarrantExportError, WarrantFormatError,
+    WarrantExportError, WarrantFormatError, WarrantIOError,
 )
 from cage.results import AssuranceResult, EvaluationResult, ExecutionObservationOrigin
 
@@ -634,3 +637,76 @@ def validate_warrant(data: str | bytes | PortableWarrant) -> WarrantValidationRe
             "record asserts execution after an ineligible decision",
         ))
     return WarrantValidationReport(True, document.disclosure, tuple(issues))
+
+
+def _file_path(path: str | Path) -> Path:
+    if not isinstance(path, (str, Path)):
+        raise CAGETypeError("path must be a str or Path")
+    return Path(path)
+
+
+def load_warrant(path: str | Path) -> PortableWarrant:
+    """Read a bounded UTF-8 portable Warrant file."""
+    source = _file_path(path)
+    try:
+        with source.open("rb") as stream:
+            data = stream.read(8 * 1024 * 1024 + 1)
+    except (OSError, ValueError) as error:
+        raise WarrantIOError("could not read portable Warrant file") from error
+    return parse_warrant(data)
+
+
+def dump_warrant(
+    document: PortableWarrant,
+    path: str | Path,
+    *,
+    overwrite: bool = False,
+) -> None:
+    """Write a validated portable record, protecting existing files by default."""
+    if not isinstance(document, PortableWarrant):
+        raise CAGETypeError("document must be a PortableWarrant")
+    destination = _file_path(path)
+    if type(overwrite) is not bool:
+        raise CAGETypeError("overwrite must be a bool")
+
+    # Complete serialization and structural validation before touching the path.
+    try:
+        serialized = document.to_json().encode("utf-8")
+    except UnicodeError as error:
+        raise WarrantExportError("Warrant contains invalid Unicode data") from error
+    parse_warrant(serialized)
+
+    if not overwrite:
+        created = False
+        try:
+            with destination.open("xb") as stream:
+                created = True
+                stream.write(serialized)
+        except FileExistsError as error:
+            raise WarrantIOError("portable Warrant file already exists") from error
+        except (OSError, ValueError) as error:
+            if created:
+                try:
+                    destination.unlink()
+                except OSError:
+                    pass
+            raise WarrantIOError("could not write portable Warrant file") from error
+        return
+
+    temporary: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="wb", prefix=".cage-warrant-", suffix=".tmp",
+            dir=destination.parent, delete=False,
+        ) as stream:
+            temporary = Path(stream.name)
+            stream.write(serialized)
+        os.replace(temporary, destination)
+    except (OSError, ValueError) as error:
+        raise WarrantIOError("could not replace portable Warrant file") from error
+    finally:
+        if temporary is not None:
+            try:
+                temporary.unlink(missing_ok=True)
+            except OSError:
+                pass
