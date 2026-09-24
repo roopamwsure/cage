@@ -136,3 +136,32 @@ def test_access_grant_refuses_existing_warrant_file(tmp_path, capsys) -> None:
     assert main(["example", "access.grant", "--warrant", str(destination)]) == 1
     assert "Could not read or write" in capsys.readouterr().err
     assert destination.read_text(encoding="utf-8") == "original"
+
+
+def test_payment_release_reconciles_without_second_dispatch(tmp_path, capsys) -> None:
+    destination = tmp_path / "payment-warrant.json"
+    assert main(["example", "payment.release", "--warrant", str(destination)]) == 0
+    output = capsys.readouterr()
+    assert "Adapter: unknown" in output.out
+    assert "First verification: inconclusive" in output.out
+    assert "First effect: effect_unknown" in output.out
+    assert "Later verification: verified_bound" in output.out
+    assert "Later effect: bound" in output.out
+    assert "Adapter dispatches: 1" in output.out
+    assert output.err == ""
+    lines = dict(line.split(": ", 1) for line in output.out.splitlines())
+    assert lines["Previous warrant ID"] == lines["Later warrant predecessor"]
+    document = load_warrant(destination)
+    assert document.previous_warrant_id == lines["Previous warrant ID"]
+    assert document.effect_state.value == "bound"
+    assert document.observation_origin == "adapter"
+    assert document.to_dict()["adapter_result"]["state"] == "unknown"
+    assert document.to_dict()["action"]["requested_effect"]["parameters"] is None
+
+
+def test_payment_release_refuses_existing_warrant_file(tmp_path, capsys) -> None:
+    destination = tmp_path / "existing.json"
+    destination.write_text("original", encoding="utf-8")
+    assert main(["example", "payment.release", "--warrant", str(destination)]) == 1
+    assert "Could not read or write" in capsys.readouterr().err
+    assert destination.read_text(encoding="utf-8") == "original"

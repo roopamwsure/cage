@@ -25,6 +25,7 @@ where = ["src"]
     "examples/sqlite_delete.py",
     "examples/sqlite_reconcile.py",
     "examples/sqlite_access_grant.py",
+    "examples/simulated_payment_release.py",
 ]
 "share/cage-assurance/docs" = [
     "docs/quickstart.md",

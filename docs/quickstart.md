@@ -41,6 +41,18 @@ cage warrant inspect .\access-warrant.json
 It requests administrator access, permits only reader access, and checks the
 stored role independently. The printed `BOUND` Effect concerns the reader grant.
 
+For a local payment release whose acknowledgement is unavailable, run:
+
+```powershell
+cage example payment.release --warrant .\payment-warrant.json
+cage warrant inspect .\payment-warrant.json
+```
+
+The first verification is inconclusive. A later read of the same simulated
+ledger entry confirms the release without dispatching a second payment. The
+final Warrant links to the first uncertain Warrant by predecessor ID; the
+exported file does not bundle that earlier Warrant.
+
 The output has these states; the Warrant ID varies per run:
 
 ```text

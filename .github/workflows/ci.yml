@@ -29,6 +29,7 @@ jobs:
           python examples/sqlite_delete.py
           python examples/sqlite_reconcile.py
           python examples/sqlite_access_grant.py
+          python examples/simulated_payment_release.py
 
   package:
     runs-on: ubuntu-latest
@@ -52,6 +53,7 @@ jobs:
               'examples/sqlite_delete.py',
               'examples/sqlite_reconcile.py',
               'examples/sqlite_access_grant.py',
+              'examples/simulated_payment_release.py',
               'docs/quickstart.md',
               'docs/reconciliation-walkthrough.md',
           )
@@ -109,7 +111,19 @@ jobs:
               [str(command), 'warrant', 'validate', str(access_warrant)],
               cwd=environment, check=True,
           )
-          for name in ('sqlite_delete.py', 'sqlite_reconcile.py', 'sqlite_access_grant.py'):
+          payment_warrant = environment / 'payment-warrant.json'
+          subprocess.run(
+              [str(command), 'example', 'payment.release', '--warrant', str(payment_warrant)],
+              cwd=environment, check=True,
+          )
+          subprocess.run(
+              [str(command), 'warrant', 'validate', str(payment_warrant)],
+              cwd=environment, check=True,
+          )
+          for name in (
+              'sqlite_delete.py', 'sqlite_reconcile.py', 'sqlite_access_grant.py',
+              'simulated_payment_release.py',
+          ):
               script = environment / 'share' / 'cage-assurance' / 'examples' / name
               assert script.is_file(), script
               subprocess.run([str(python), str(script)], cwd=environment, check=True)
