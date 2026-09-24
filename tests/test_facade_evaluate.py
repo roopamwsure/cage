@@ -4,7 +4,7 @@ from cage._facade import CAGE
 from cage.config import CAGEConfig
 from cage.core.attempt import Attempt
 from cage.core.decision import DecisionState
-from cage.errors import CAGETypeError, CAGEValueError
+from cage.errors import CAGETypeError, CAGEValueError, IdentityConflictError
 from cage.core.evaluation import EvaluationOutcome
 from cage.core.idempotency import IdempotencyConflictError
 from cage.identifiers import EvaluationIds, IdentityKind
@@ -387,7 +387,7 @@ def test_evaluate_replay_rejects_predecessor_event_id_reuse(
     )
 
     with pytest.raises(
-        CAGEValueError,
+        IdentityConflictError,
         match=f"{field_name} must not reuse the previous",
     ):
         cage.evaluate(

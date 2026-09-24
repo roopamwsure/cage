@@ -69,6 +69,7 @@ def test_sdk_identifier_result_and_error_imports() -> None:
         DuplicateVerificationError,
         ExecutionError,
         IdentifierGenerationError,
+        IdentityConflictError,
         VerificationResultMismatchError,
         VerifierContractError,
         VerifierInvocationError,
@@ -97,12 +98,14 @@ def test_sdk_identifier_result_and_error_imports() -> None:
         for result_type in (EvaluationResult, ExecutionResult, AssuranceResult)
     )
     assert ExecutionObservationOrigin.SDK_RECOVERY.value == "sdk_recovery"
+    assert issubclass(IdentityConflictError, CAGEValueError)
     assert all(
         issubclass(error_type, CAGEError)
         for error_type in (
             CAGETypeError,
             CAGEValueError,
             IdentifierGenerationError,
+            IdentityConflictError,
             ExecutionError,
             AdapterInvocationError,
             AdapterContractError,

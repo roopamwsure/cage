@@ -57,6 +57,7 @@ from cage.errors import (
     DuplicateExecutionError,
     DuplicateReconciliationError,
     DuplicateVerificationError,
+    IdentityConflictError,
     VerificationResultMismatchError,
     VerifierContractError,
     VerifierInvocationError,
@@ -198,7 +199,7 @@ def _validate_replay_ids(
 
     for field_name, proposed_id, predecessor_id in predecessor_ids:
         if proposed_id is not None and proposed_id == predecessor_id:
-            raise CAGEValueError(
+            raise IdentityConflictError(
                 f"{field_name} must not reuse the previous "
                 "evaluation identity"
             )
@@ -722,17 +723,17 @@ class CAGE:
             previous is not None
             and warrant_id == previous.warrant.warrant_id
         ):
-            raise CAGEValueError(
+            raise IdentityConflictError(
                 "warrant_id must differ from previous warrant_id"
             )
 
         if previous is not None:
             if effect_id == previous.effect.effect_id:
-                raise CAGEValueError(
+                raise IdentityConflictError(
                     "effect_id must differ from previous effect_id"
                 )
             if effect_proof_id == previous.effect_proof.proof_id:
-                raise CAGEValueError(
+                raise IdentityConflictError(
                     "effect_proof_id must differ from "
                     "previous effect_proof_id"
                 )

@@ -26,6 +26,10 @@ class CAGEValueError(CAGEError, ValueError):
     """Raised when an SDK argument has an invalid value."""
 
 
+class IdentityConflictError(CAGEValueError):
+    """Raised when a record ID conflicts with a known predecessor."""
+
+
 class WarrantExportError(CAGEValueError):
     """Raised when a native Warrant cannot be safely exported."""
 

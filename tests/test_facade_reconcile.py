@@ -14,6 +14,7 @@ from cage.core.verification import EffectVerificationResult, VerificationState
 from cage.errors import (
     AssuranceAssemblyError,
     CAGEValueError,
+    IdentityConflictError,
     DuplicateReconciliationError,
     VerifierInvocationError,
 )
@@ -250,7 +251,7 @@ def test_reconcile_rejects_previous_warrant_id_before_verification() -> None:
     )
 
     with pytest.raises(
-        CAGEValueError,
+        IdentityConflictError,
         match="warrant_id must differ from previous warrant_id",
     ):
         cage.reconcile(
@@ -330,7 +331,7 @@ def test_reconcile_rejects_previous_effect_identities_before_verification(
         warrant_id="warrant-2",
     )
 
-    with pytest.raises(CAGEValueError, match=expected_message):
+    with pytest.raises(IdentityConflictError, match=expected_message):
         cage.reconcile(previous, verifier=verifier, ids=ids)
 
     assert verifier.calls == [execution.adapter_result]
