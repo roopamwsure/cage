@@ -5,6 +5,8 @@ trust boundaries. For a runnable local sequence, start with the
 [Quickstart](quickstart.md); for the exact signatures and import map, see the
 [public API](v0.7-public-api.md). The examples use disposable fixtures. None
 of them is a production payment, access-control, or database integration.
+For a failure-by-failure recovery reference, see the
+[failure and recovery guide](failure-and-recovery.md).
 
 ## Responsibilities at the boundary
 

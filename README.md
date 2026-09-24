@@ -23,6 +23,8 @@ local SQLite example from a source checkout, see the
 See the [integration guide](docs/integration-guide.md) for adapter, verifier,
 failure-recovery, and trust-boundary guidance, and the
 [release readiness review](docs/v0.7-release-readiness.md) for remaining gates.
+For errors and uncertain outcomes, see the
+[failure and recovery guide](docs/failure-and-recovery.md).
 
 Current release:
 
