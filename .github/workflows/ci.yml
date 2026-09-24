@@ -46,6 +46,8 @@ jobs:
         run: |
           python - <<'PY'
           from pathlib import Path
+          from email.parser import BytesParser
+          from email.policy import default
           import tarfile
           import zipfile
 
@@ -63,9 +65,19 @@ jobs:
               if distribution.suffix == '.whl':
                   with zipfile.ZipFile(distribution) as archive:
                       names = archive.namelist()
+                      metadata = archive.read(next(
+                          name for name in names if name.endswith('.dist-info/METADATA')
+                      ))
+                      assert any(name.endswith('.dist-info/licenses/LICENSE') for name in names)
               else:
                   with tarfile.open(distribution) as archive:
                       names = archive.getnames()
+                      metadata = archive.extractfile(next(
+                          name for name in names if name.endswith('/PKG-INFO')
+                      )).read()
+                      assert any(name.endswith('/LICENSE') for name in names)
+              parsed = BytesParser(policy=default).parsebytes(metadata)
+              assert parsed['License-Expression'] == 'Apache-2.0', distribution
               for path in expected:
                   assert any(name.endswith(path) for name in names), (distribution, path)
           PY
