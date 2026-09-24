@@ -7,9 +7,13 @@ import json
 
 from cage.core._json import freeze_json_value
 from cage.core.decision import DecisionState
+from cage.core.effect import EffectState
 from cage.core.warrant import Warrant
 from cage.errors import CAGETypeError, CAGEValueError, WarrantExportError
-from cage.results import EvaluationResult
+from cage.results import AssuranceResult, EvaluationResult, ExecutionObservationOrigin
+
+
+_RECOVERY_MARKER = "urn:cage:sdk:recovery-observation"
 
 
 class WarrantDisclosure(StrEnum):
@@ -39,7 +43,7 @@ def _check_depth(value: object) -> None:
 
 @dataclass(frozen=True, slots=True)
 class PortableWarrant:
-    """Immutable detached decision snapshot; never an execution capability."""
+    """Immutable detached lifecycle snapshot; never an execution capability."""
 
     _data: object
 
@@ -88,36 +92,37 @@ class PortableWarrant:
         return DecisionState(self._data["decision"]["state"])  # type: ignore[index]
 
     @property
-    def effect_state(self) -> None:
-        return None
+    def effect_state(self) -> EffectState | None:
+        effect = self._data["effect"]  # type: ignore[index]
+        return None if effect is None else EffectState(effect["state"])
 
     @property
-    def execution_attempt_id(self) -> None:
-        return None
+    def execution_attempt_id(self) -> str | None:
+        attempt = self._data["execution_attempt"]  # type: ignore[index]
+        return None if attempt is None else attempt["execution_attempt_id"]
 
     @property
     def previous_warrant_id(self) -> str | None:
         return self._data["warrant"]["previous_warrant_id"]  # type: ignore[index]
 
     @property
-    def observation_origin(self) -> None:
-        return None
+    def observation_origin(self) -> str | None:
+        adapter = self._data["adapter_result"]  # type: ignore[index]
+        return None if adapter is None else adapter["origin"]
 
 
 def export_warrant(
-    source: Warrant | EvaluationResult,
+    source: Warrant | EvaluationResult | AssuranceResult,
     *,
     disclosure: WarrantDisclosure = WarrantDisclosure.SUMMARY,
 ) -> PortableWarrant:
-    """Export a decision-only Warrant; assured paths require a later slice."""
+    """Export a detached, internally consistent lifecycle snapshot."""
 
     if not isinstance(disclosure, WarrantDisclosure):
         raise CAGETypeError("disclosure must be a WarrantDisclosure")
-    if not isinstance(source, (Warrant, EvaluationResult)):
-        raise CAGETypeError("source must be a Warrant or EvaluationResult")
-    warrant = source.warrant if isinstance(source, EvaluationResult) else source
-    if warrant.effect_proof is not None:
-        raise WarrantExportError("only decision-only Warrants are supported yet")
+    if not isinstance(source, (Warrant, EvaluationResult, AssuranceResult)):
+        raise CAGETypeError("source must be a Warrant, EvaluationResult, or AssuranceResult")
+    warrant = source if isinstance(source, Warrant) else source.warrant
 
     proof = warrant.decision_proof
     decision = proof.decision
@@ -135,6 +140,35 @@ def export_warrant(
         omitted.append("decision.permitted_effect.parameters")
     if summary:
         omitted.extend(f"decision_proof.{name}_refs" for name in refs)
+
+    effect_proof = warrant.effect_proof
+    if effect_proof is not None:
+        verification = effect_proof.verification
+        adapter_result = verification.adapter_result
+        execution_attempt = adapter_result.execution_attempt
+        effect = effect_proof.effect
+        if execution_attempt.decision != decision:
+            raise WarrantExportError("execution decision does not match Warrant decision")
+        if effect.consequence != consequence:
+            raise WarrantExportError("Effect consequence does not match Warrant consequence")
+        if verification.consequence != consequence:
+            raise WarrantExportError("verification consequence does not match Warrant consequence")
+        if isinstance(source, AssuranceResult):
+            origin = source.observation_origin.value
+        elif _RECOVERY_MARKER in adapter_result.references:
+            origin = ExecutionObservationOrigin.SDK_RECOVERY.value
+        else:
+            origin = "unspecified"
+        if origin == "sdk_recovery" and adapter_result.state.value != "unknown":
+            raise WarrantExportError("SDK recovery observation must have unknown adapter state")
+        if origin == "sdk_recovery" and _RECOVERY_MARKER not in adapter_result.references:
+            raise WarrantExportError("SDK recovery observation requires recovery marker")
+        if origin == "adapter" and _RECOVERY_MARKER in adapter_result.references:
+            raise WarrantExportError("adapter observation contains SDK recovery marker")
+        if summary:
+            omitted.extend((
+                "adapter_result.references", "verification.references", "effect.verification_refs",
+            ))
 
     payload: dict[str, object] = {
         "format": "cage.warrant",
@@ -187,6 +221,41 @@ def export_warrant(
         "effect": None,
         "effect_proof": None,
     }
+    if effect_proof is not None:
+        payload.update({
+            "execution_attempt": {
+                "execution_attempt_id": execution_attempt.execution_attempt_id,
+                "decision_id": decision.decision_id,
+                "previous_execution_attempt_id": execution_attempt.previous_execution_attempt_id,
+            },
+            "adapter_result": {
+                "result_id": adapter_result.result_id,
+                "execution_attempt_id": execution_attempt.execution_attempt_id,
+                "state": adapter_result.state.value,
+                "origin": origin,
+                "references": None if summary else list(adapter_result.references),
+                "reference_count": len(adapter_result.references),
+            },
+            "verification": {
+                "verification_id": verification.verification_id,
+                "adapter_result_id": adapter_result.result_id,
+                "state": verification.state.value,
+                "references": None if summary else list(verification.references),
+                "reference_count": len(verification.references),
+            },
+            "effect": {
+                "effect_id": effect.effect_id,
+                "consequence_id": consequence.consequence_id,
+                "state": effect.state.value,
+                "verification_refs": None if summary else list(effect.verification_refs),
+                "verification_ref_count": len(effect.verification_refs),
+            },
+            "effect_proof": {
+                "proof_id": effect_proof.proof_id,
+                "effect_id": effect.effect_id,
+                "verification_id": verification.verification_id,
+            },
+        })
     try:
         _check_depth(payload)
         frozen = freeze_json_value(payload)
