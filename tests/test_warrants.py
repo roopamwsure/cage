@@ -83,7 +83,7 @@ def test_assured_full_preserves_ordered_duplicate_references_and_core_origin() -
     document = export_warrant(assurance.warrant, disclosure=WarrantDisclosure.FULL)
     payload = document.to_dict()
 
-    assert document.observation_origin == "unspecified"
+    assert document.observation_origin is None
     assert payload["adapter_result"]["origin"] == "unspecified"
     assert payload["adapter_result"]["references"] == ["private-receipt"]
     assert payload["verification"]["references"] == ["private-proof", "private-proof"]

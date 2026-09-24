@@ -11,7 +11,7 @@ import tempfile
 from cage.core._json import freeze_json_value
 from cage.core.decision import DecisionState
 from cage.core.effect import EffectState
-from cage.core.warrant import Warrant
+from cage.core.warrant import DecisionProof, EffectProof, Warrant
 from cage.errors import (
     CAGETypeError, CAGEValueError, UnsupportedWarrantVersionError,
     WarrantExportError, WarrantFormatError, WarrantIOError,
@@ -20,6 +20,13 @@ from cage.results import AssuranceResult, EvaluationResult, ExecutionObservation
 
 
 _RECOVERY_MARKER = "urn:cage:sdk:recovery-observation"
+
+__all__ = [
+    "Warrant", "DecisionProof", "EffectProof", "PortableWarrant",
+    "WarrantDisclosure", "ValidationIssue", "WarrantValidationReport",
+    "export_warrant", "parse_warrant", "load_warrant", "dump_warrant",
+    "validate_warrant",
+]
 
 
 class WarrantDisclosure(StrEnum):
@@ -114,7 +121,7 @@ class PortableWarrant:
     @property
     def observation_origin(self) -> str | None:
         adapter = self._data["adapter_result"]  # type: ignore[index]
-        return None if adapter is None else adapter["origin"]
+        return None if adapter is None or adapter["origin"] == "unspecified" else adapter["origin"]
 
 
 def export_warrant(

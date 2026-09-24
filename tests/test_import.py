@@ -116,3 +116,29 @@ def test_sdk_identifier_result_and_error_imports() -> None:
             DuplicateVerificationError,
         )
     )
+
+
+def test_portable_warrant_public_imports_are_stable() -> None:
+    import cage.warrants as portable
+    from cage.core.warrant import DecisionProof, EffectProof, Warrant
+    from cage.errors import (
+        WarrantExportError, WarrantFormatError, WarrantIOError,
+        UnsupportedWarrantVersionError,
+    )
+
+    assert portable.Warrant is Warrant
+    assert portable.DecisionProof is DecisionProof
+    assert portable.EffectProof is EffectProof
+    assert set(portable.__all__) == {
+        "Warrant", "DecisionProof", "EffectProof", "PortableWarrant",
+        "WarrantDisclosure", "ValidationIssue", "WarrantValidationReport",
+        "export_warrant", "parse_warrant", "load_warrant", "dump_warrant",
+        "validate_warrant",
+    }
+    assert all(callable(getattr(portable, name)) for name in (
+        "export_warrant", "parse_warrant", "load_warrant", "dump_warrant",
+        "validate_warrant",
+    ))
+    assert issubclass(UnsupportedWarrantVersionError, WarrantFormatError)
+    assert issubclass(WarrantExportError, ValueError)
+    assert issubclass(WarrantIOError, OSError)
