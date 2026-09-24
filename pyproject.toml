@@ -9,6 +9,9 @@ description = "Control Assurance Governance Evaluation"
 requires-python = ">=3.11"
 dependencies = []
 
+[project.scripts]
+cage = "cage.cli:main"
+
 [project.optional-dependencies]
 dev = [
     "pytest>=8,<9",

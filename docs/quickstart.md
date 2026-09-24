@@ -43,3 +43,18 @@ database acknowledgement alone establishes the external effect.
 
 For a first observation that is inconclusive and a later observation without
 another delete, see the [reconciliation walkthrough](reconciliation-walkthrough.md).
+
+## Inspect an exported portable Warrant
+
+After your application has exported a Warrant with `dump_warrant()` from
+`cage.warrants`, inspect its lifecycle metadata and check its file structure:
+
+```powershell
+cage warrant inspect .\assurance-warrant.json
+cage warrant validate .\assurance-warrant.json
+```
+
+`inspect` shows lifecycle IDs and states without printing business payloads or
+reference contents. `validate` reports structural consistency, omitted fields,
+and unresolved predecessor links. A valid file is an inspection record, not
+proof that its claims are authentic or that an external effect still holds.
