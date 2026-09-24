@@ -31,6 +31,16 @@ cage example database.delete --warrant .\delete-warrant.json
 The optional file contains the final assurance snapshot with SUMMARY disclosure.
 The command refuses to overwrite an existing file.
 
+For a narrowed Decision, run the local access-record example:
+
+```powershell
+cage example access.grant --warrant .\access-warrant.json
+cage warrant inspect .\access-warrant.json
+```
+
+It requests administrator access, permits only reader access, and checks the
+stored role independently. The printed `BOUND` Effect concerns the reader grant.
+
 The output has these states; the Warrant ID varies per run:
 
 ```text

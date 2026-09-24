@@ -109,3 +109,30 @@ def test_module_entrypoint_runs_example_without_source_script(tmp_path) -> None:
     assert result.returncode == 0, result.stderr
     assert "Effect: bound" in result.stdout
     assert load_warrant(destination).effect_state.value == "bound"
+
+
+def test_access_grant_example_enforces_narrowed_role(tmp_path, capsys) -> None:
+    destination = tmp_path / "access-warrant.json"
+    assert main(["example", "access.grant", "--warrant", str(destination)]) == 0
+    output = capsys.readouterr()
+    assert "Decision: narrowed" in output.out
+    assert "Requested role: administrator" in output.out
+    assert "Permitted role: reader" in output.out
+    assert "Verification: verified_bound" in output.out
+    assert "Effect: bound" in output.out
+    assert output.err == ""
+    document = load_warrant(destination)
+    data = document.to_dict()
+    assert document.decision_state is DecisionState.NARROWED
+    assert document.effect_state.value == "bound"
+    assert data["decision"]["permitted_effect"] == {"parameters": None}
+    assert "decision.permitted_effect.parameters" in data["disclosure"]["omitted_fields"]
+    assert data["action"]["requested_effect"] == {"parameters": None}
+
+
+def test_access_grant_refuses_existing_warrant_file(tmp_path, capsys) -> None:
+    destination = tmp_path / "existing.json"
+    destination.write_text("original", encoding="utf-8")
+    assert main(["example", "access.grant", "--warrant", str(destination)]) == 1
+    assert "Could not read or write" in capsys.readouterr().err
+    assert destination.read_text(encoding="utf-8") == "original"

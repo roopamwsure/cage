@@ -28,6 +28,7 @@ jobs:
         run: |
           python examples/sqlite_delete.py
           python examples/sqlite_reconcile.py
+          python examples/sqlite_access_grant.py
 
   package:
     runs-on: ubuntu-latest
@@ -50,6 +51,7 @@ jobs:
           expected = (
               'examples/sqlite_delete.py',
               'examples/sqlite_reconcile.py',
+              'examples/sqlite_access_grant.py',
               'docs/quickstart.md',
               'docs/reconciliation-walkthrough.md',
           )
@@ -98,7 +100,16 @@ jobs:
               [str(command), 'warrant', 'validate', str(warrant)],
               cwd=environment, check=True,
           )
-          for name in ('sqlite_delete.py', 'sqlite_reconcile.py'):
+          access_warrant = environment / 'access-warrant.json'
+          subprocess.run(
+              [str(command), 'example', 'access.grant', '--warrant', str(access_warrant)],
+              cwd=environment, check=True,
+          )
+          subprocess.run(
+              [str(command), 'warrant', 'validate', str(access_warrant)],
+              cwd=environment, check=True,
+          )
+          for name in ('sqlite_delete.py', 'sqlite_reconcile.py', 'sqlite_access_grant.py'):
               script = environment / 'share' / 'cage-assurance' / 'examples' / name
               assert script.is_file(), script
               subprocess.run([str(python), str(script)], cwd=environment, check=True)

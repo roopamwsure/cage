@@ -19,6 +19,9 @@ def _parser() -> argparse.ArgumentParser:
     examples.add_parser("database.delete", help="Delete a record in local SQLite").add_argument(
         "--warrant", metavar="PATH", help="Write a SUMMARY portable Warrant"
     )
+    examples.add_parser("access.grant", help="Grant narrowed local access").add_argument(
+        "--warrant", metavar="PATH", help="Write a SUMMARY portable Warrant"
+    )
     warrant = command.add_parser("warrant", help="Read a portable Warrant")
     operation = warrant.add_subparsers(dest="operation", required=True)
     for name in ("inspect", "validate"):
@@ -31,9 +34,11 @@ def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
         if args.command == "example":
-            from cage._sqlite_example import main as sqlite_delete
-
-            sqlite_delete(warrant_path=args.warrant)
+            if args.scenario == "database.delete":
+                from cage._sqlite_example import main as run_example
+            else:
+                from cage._access_example import main as run_example
+            run_example(warrant_path=args.warrant)
             return 0
         document = load_warrant(args.path)
         report = validate_warrant(document)
