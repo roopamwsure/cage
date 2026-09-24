@@ -25,6 +25,8 @@ failure-recovery, and trust-boundary guidance, and the
 [release readiness review](docs/v0.7-release-readiness.md) for remaining gates.
 For errors and uncertain outcomes, see the
 [failure and recovery guide](docs/failure-and-recovery.md).
+For portable JSON Warrants and CLI inspection, see the
+[portable Warrant guide](docs/portable-warrants-and-cli.md).
 
 Current release:
 

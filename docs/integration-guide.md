@@ -7,6 +7,8 @@ trust boundaries. For a runnable local sequence, start with the
 of them is a production payment, access-control, or database integration.
 For a failure-by-failure recovery reference, see the
 [failure and recovery guide](failure-and-recovery.md).
+For detached Warrant files and CLI validation, see the
+[portable Warrant guide](portable-warrants-and-cli.md).
 
 ## Responsibilities at the boundary
 
