@@ -9,6 +9,7 @@ For a failure-by-failure recovery reference, see the
 [failure and recovery guide](failure-and-recovery.md).
 For detached Warrant files and CLI validation, see the
 [portable Warrant guide](portable-warrants-and-cli.md).
+For Decision and Effect meanings, see the [semantic guide](semantic-guide.md).
 
 ## Responsibilities at the boundary
 

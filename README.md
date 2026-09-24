@@ -27,6 +27,8 @@ For errors and uncertain outcomes, see the
 [failure and recovery guide](docs/failure-and-recovery.md).
 For portable JSON Warrants and CLI inspection, see the
 [portable Warrant guide](docs/portable-warrants-and-cli.md).
+For the meaning of Decisions, execution observations, and Effects, see the
+[semantic guide](docs/semantic-guide.md).
 
 Current release:
 
