@@ -19,7 +19,7 @@ Those systems may become assurance inputs, adapters, evidence sources, execution
 
 The source code is licensed under [Apache License 2.0](LICENSE).
 
-The v0.7 developer SDK is on the release candidate branch. To run its
+The v0.7 developer SDK is released as `v0.7.0`. To run its
 local SQLite example from a source checkout, see the
 [v0.7 Quickstart](docs/quickstart.md).
 See the [integration guide](docs/integration-guide.md) for adapter, verifier,
@@ -37,11 +37,11 @@ changes are summarized in the [changelog](CHANGELOG.md).
 
 Release status:
 
-**v0.7.0 — Developer Product (release candidate)**
+**v0.7.0 — Developer Product**
 
 v0.7 adds a facade, local examples, a CLI, portable Warrant inspection,
-and developer integration guides. Its package metadata is `0.7.0` on the
-feature branch; a tagged release and package publication are separate steps.
+and developer integration guides. Its package metadata is `0.7.0`;
+package publication is a separate action from the source release.
 
 Previous release: **v0.6.0 — Consequence Custody**
 

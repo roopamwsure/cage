@@ -45,6 +45,6 @@ first, then the full suite. Review `git diff --check` and the final diff
 before submitting a pull request; explain what changed, how it was tested,
 and any behavior that remains unverified.
 
-The feature branch declares package version `0.7.0` as a release candidate.
+The current source release version is `0.7.0`.
 A successful contribution or test run does not authorize
 a release, tag, or package publication.

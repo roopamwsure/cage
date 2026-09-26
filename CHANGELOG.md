@@ -1,9 +1,8 @@
 # Changelog
 
-This file summarizes released versions and work on the v0.7 feature branch.
-Version 0.7.0 is a release candidate until it is tagged and published.
+This file summarizes released versions and notable development changes.
 
-## 0.7.0 — Developer Product (release candidate)
+## 0.7.0 — Developer Product
 
 ### Added
 
