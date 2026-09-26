@@ -1,4 +1,4 @@
-﻿# Changelog
+# Changelog
 
 This file summarizes released versions and notable development changes.
 
