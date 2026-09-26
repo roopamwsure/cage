@@ -45,6 +45,6 @@ first, then the full suite. Review `git diff --check` and the final diff
 before submitting a pull request; explain what changed, how it was tested,
 and any behavior that remains unverified.
 
-The current source release version is `0.7.0`.
+The current source release version is `0.7.1`.
 A successful contribution or test run does not authorize
 a release, tag, or package publication.
