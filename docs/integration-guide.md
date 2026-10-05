@@ -1,15 +1,17 @@
 # Integrating CAGE v0.7
 
-This guide covers application-owned rules, adapters, verifiers, failures, and
-trust boundaries. For a runnable local sequence, start with the
-[Quickstart](quickstart.md); for the exact signatures and import map, see the
-[public API](v0.7-public-api.md). The examples use disposable fixtures. None
-of them is a production payment, access-control, or database integration.
-For a failure-by-failure recovery reference, see the
-[failure and recovery guide](failure-and-recovery.md).
-For detached Warrant files and CLI validation, see the
-[portable Warrant guide](portable-warrants-and-cli.md).
-For Decision and Effect meanings, see the [semantic guide](semantic-guide.md).
+This guide explains how an application connects CAGE to its own rules,
+adapters, verifiers, and target systems. Start with the
+[Quickstart](quickstart.md) if you want to run the local example first. The
+[public API](v0.7-public-api.md) contains the exact signatures and supported
+imports.
+
+The examples here use disposable local fixtures. They show the integration
+pattern; they are not production payment, access-control, or database
+integrations. See the [failure and recovery guide](failure-and-recovery.md)
+for recovery paths, the [portable Warrant guide](portable-warrants-and-cli.md)
+for detached records and CLI validation, and the [semantic guide](semantic-guide.md)
+for Decision and Effect terminology.
 
 ## Responsibilities at the boundary
 
@@ -21,14 +23,15 @@ For Decision and Effect meanings, see the [semantic guide](semantic-guide.md).
 | Verifier | Independently reads suitable target evidence for this consequence and returns a verification state | A callback can be mistaken or dishonest; CAGE checks its record links, not the truth of its external claims |
 | Target system | Stores the business effect and exposes suitable correlation and observation data | Delays or missing evidence can make verification inconclusive |
 
-The caller constructs `CAGE(rule=...)`. A rule returns `EvaluationOutcome`,
-including an explicit `DecisionState` and, for a narrowed decision, a
-`RequestedEffect` containing the permitted parameters. A returned `ADMITTED`
-or `NARROWED` Decision is permission to *attempt* the selected effect through
-custody, not a capability or proof of an Effect. The application supplies an
-`ExecutionCapability` scoped to the evaluation's `consequence_id`, action
-type, and resource ID. Custody checks eligibility and scope before invoking
-the adapter. Do not mint an authority merely because a rule admitted an action.
+Create the facade with `CAGE(rule=...)`. The rule returns an
+`EvaluationOutcome` with an explicit `DecisionState`. For a narrowed
+decision, it also carries the permitted `RequestedEffect`.
+
+An `ADMITTED` or `NARROWED` Decision means CAGE may attempt the selected
+effect under custody. It is not execution authority by itself, and it is not
+proof that an Effect occurred. The application must still provide an
+`ExecutionCapability` scoped to the same consequence, action type, and
+resource. CAGE checks that scope before the adapter is called.
 
 ## Writing an adapter
 
@@ -88,13 +91,15 @@ or transient error can require `INCONCLUSIVE` instead. CAGE maps these states
 to `BOUND`, `NO_BIND`, and `EFFECT_UNKNOWN`, respectively. A verifier must not
 mutate the target to make its observation true.
 
-The local payment fixture deliberately writes one ledger entry and returns
-adapter `UNKNOWN`. Its first verifier cannot observe the ledger and returns
-`INCONCLUSIVE`; a later verifier reads the existing entry and returns
-`VERIFIED_BOUND`. Run `cage example payment.release` to see the single
-dispatch and linked Warrants. The fixture begins with an empty ledger and
-uses one known invoice and amount; production integrations need a durable
-operation correlation scheme appropriate to their target.
+The payment example is designed to show an uncertain outcome. It writes one
+ledger entry, but the adapter returns `UNKNOWN`. The first verifier cannot see
+the entry and reports `INCONCLUSIVE`. A later verifier reads the same ledger
+state and returns `VERIFIED_BOUND`.
+
+Run `cage example payment.release` to see the single dispatch and linked
+Warrants. The fixture uses one known invoice and amount. A production
+integration will need its own durable way to correlate an operation with the
+target system.
 
 ## Failures, observation, and recovery
 
