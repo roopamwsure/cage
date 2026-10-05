@@ -1,9 +1,9 @@
 # Failures and recovery in CAGE v0.7
 
-Start with the [Quickstart](quickstart.md) for a complete local lifecycle.
-This guide explains what an application can infer when a callback or SDK
-operation fails. It describes the current feature branch behavior, not a
-durable recovery protocol.
+Start with the [Quickstart](quickstart.md) if you want to see the full local
+lifecycle first. This guide focuses on what the application can safely conclude
+when an SDK call, adapter, or verifier fails. The recovery described here is
+local to the current v0.7 runtime; it is not a durable recovery protocol.
 
 ## First distinguish a state from an exception
 
@@ -103,12 +103,12 @@ later = cage.reconcile(previous=assurance, verifier=later_verifier)
 assert later.warrant.previous_warrant_id == assurance.warrant.warrant_id
 ```
 
-`reconcile()` is observation-only: it reuses the original adapter result and
-creates a new verification, Effect, proof, and Warrant. It does not invoke
-the adapter. A reconciliation callback failure retains `error.previous`,
-allowing another explicit `reconcile(error.previous, verifier=...)` after the
-failure has been addressed. Previously returned snapshots remain historical;
-a later observation does not revise them.
+`reconcile()` only observes. It reuses the original adapter result and creates
+a new verification, Effect, proof, and Warrant without calling the adapter
+again. If the reconciliation callback fails, `error.previous` keeps the prior
+snapshot so the application can retry observation later with
+`reconcile(error.previous, verifier=...)`. Earlier snapshots stay unchanged;
+new evidence adds history rather than rewriting it.
 
 An `AssuranceAssemblyError` means the verifier returned a valid observation
 but later local assembly failed. It retains `execution`, `verification`,
@@ -144,10 +144,12 @@ omission rules in the [public API](v0.7-public-api.md), sections 18–21.
 
 ## Scope of recovery
 
-The facade's idempotency registry and dispatch/verification reservations
-live only in one Python process and one `CAGE` instance. A new process does
-not inherit them. A portable Warrant is detached inspection data, not an
-executable restart context. If a process exits after a possible external
-operation, use the application's own durable operation correlation and
-target-system evidence to determine the outcome. Do not assume an automatic
-retry or an exactly-once guarantee from this SDK.
+The facade keeps its idempotency registry and dispatch/verification
+reservations in one Python process and one `CAGE` instance. Restarting the
+process loses that in-memory state. A portable Warrant is useful for inspection,
+but it is not a resumable execution context.
+
+If the process exits after an external operation may have started, recovery
+depends on the application's durable operation identifiers and evidence from
+the target system. v0.7 does not provide automatic retry or an exactly-once
+execution guarantee.
