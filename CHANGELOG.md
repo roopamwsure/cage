@@ -2,7 +2,7 @@
 
 This file summarizes released versions and notable development changes.
 
-## 0.7.1 â€” PyPI Distribution
+## 0.7.1 — PyPI Distribution
 
 ### Added
 
@@ -16,7 +16,7 @@ This file summarizes released versions and notable development changes.
 
 - No CAGE runtime semantic changes from v0.7.0.
 
-## 0.7.0 â€” Developer Product
+## 0.7.0 — Developer Product
 
 ### Added
 
@@ -38,14 +38,15 @@ This file summarizes released versions and notable development changes.
   facade dispatch history. SUMMARY is not anonymization.
 - Baseline v0.6 core modules, public signatures, and existing test functions
   remain present. The [release review](docs/v0.7-release-readiness.md)
-  tracks evidence and remaining gates before v0.7 is declared ready.
+  preserves the release-readiness evidence and the explicitly deferred D1
+  onboarding gate.
 
-## v0.6.0 â€” Consequence Custody
+## v0.6.0 — Consequence Custody
 
 Extends the generic consequence model through controlled external execution,
 adapter observation, verification, Effect, EffectProof, and Warrant lineage.
 
-## v0.5.0 â€” Generic Consequence Core
+## v0.5.0 — Generic Consequence Core
 
 Establishes consequence identity, evaluation Attempts, normalized assurance
 inputs, Decision and Effect semantics, replay, idempotency, and proof
