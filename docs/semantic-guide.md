@@ -1,91 +1,406 @@
-# CAGE decision and effect semantics
+# CAGE Decision and Effect Semantics
 
-CAGE evaluates a proposed business action, controls an execution attempt,
-and records what an independent observation can establish afterward. The
-decision to permit an attempt and evidence of its external effect answer
-different questions. This guide describes the states developers see through
-the v0.7 facade. Start with the [Quickstart](quickstart.md) for runnable code
-and the [integration guide](integration-guide.md) for callback contracts.
+CAGE separates permission from outcome.
+
+It evaluates a proposed business action, controls whether that action may cross
+into external execution, and then records what later verification can establish
+about the resulting external state.
+
+Those are different questions:
+
+```text
+Decision != Effect
+```
+
+A Decision says what CAGE permitted.
+
+An Effect says what authoritative verification established afterward.
+
+This guide explains the states exposed through the v0.7 facade.
+
+For runnable code, start with the [Quickstart](quickstart.md).
+
+For adapter and verifier contracts, see the
+[Integration guide](integration-guide.md).
+
+---
 
 ## Identity and evaluation
 
-An `Action` names the principal, agent, resource, action type, and requested
-effect. A `Consequence` names the intended business outcome. Each evaluation
-has its own `Attempt`; repeated evaluations of one Consequence can have
-different Attempts. Supply a stable, application-owned `idempotency_key`
-when calling `CAGE.evaluate(...)`. Passing `previous=...` re-evaluates the
-same Consequence with a new Attempt and preserves its lineage. It does not
-invoke an adapter. Reusing a key with a conflicting action or overriding an
-existing identity with a conflicting value fails before dispatch.
+An `Action` describes the proposed operation, including:
 
-The application rule consumes normalized evidence, standing, delegations,
-approvals, and context and returns an `EvaluationOutcome`. The resulting
-`DecisionProof` records the basis of the decision; it is not an observation
-of the target system. The five Decision states mean:
+- Principal;
+- Agent;
+- Resource;
+- action type; and
+- RequestedEffect.
 
-| Decision | Meaning at the execution boundary |
+A `Consequence` identifies the intended business consequence.
+
+Each evaluation of that Consequence has its own `Attempt`.
+
+For example:
+
+```text
+Consequence C1
+    |
+    +-- Attempt A1
+    +-- Attempt A2
+```
+
+Both Attempts can refer to the same business Consequence.
+
+When calling:
+
+```python
+CAGE.evaluate(...)
+```
+
+the application should supply a stable `idempotency_key` for that business
+operation.
+
+Reusing the same key for equivalent business intent resolves to the same
+Consequence.
+
+Reusing it for materially different intent fails explicitly.
+
+Passing `previous=...` re-evaluates the same Consequence with a new Attempt and
+preserves replay lineage.
+
+It does not invoke an adapter.
+
+---
+
+## Decision
+
+The application rule consumes normalized assurance inputs such as:
+
+```text
+Evidence
+Standing
+Delegation
+Approval
+Context
+```
+
+and returns an `EvaluationOutcome`.
+
+CAGE turns that outcome into a Decision and `DecisionProof`.
+
+`DecisionProof` records the assurance basis for the Decision.
+
+It does not describe what happened in the external system.
+
+The five Decision states are:
+
+| Decision | Meaning |
 | --- | --- |
-| `ADMITTED` | The originally requested effect may be attempted. |
-| `NARROWED` | Only the explicitly permitted effect may be attempted; the broader request is not substituted. |
-| `HELD` | Do not execute under custody yet. |
-| `ESCALATED` | Do not execute under custody; further authority or review is needed. |
-| `REFUSED` | Do not execute under custody. This does not prove that nothing changed elsewhere. |
+| `ADMITTED` | The original RequestedEffect may proceed toward execution |
+| `NARROWED` | Only the explicit `permitted_effect` may proceed |
+| `HELD` | Do not execute under custody yet |
+| `ESCALATED` | Do not execute under custody; further review or authority is needed |
+| `REFUSED` | Do not execute under custody |
 
-## Custody and adapter observation
+These are execution-boundary decisions.
 
-For `ADMITTED` or `NARROWED`, `CAGE.execute(...)` checks a scoped capability
-and invokes an application adapter under custody. The `EvaluationAttempt`
-and `ExecutionAttempt` are different records. A single facade instance
-reserves dispatch by Consequence to prevent another dispatch through that
-instance. This memory is not shared across processes or restored after a
-restart; the target integration still needs durable idempotency and
-correlation.
+They are not Effect states.
 
-An adapter can report `ACKNOWLEDGED`, `REJECTED`, `ERROR`, or `UNKNOWN`.
-These are reports about an execution attempt, not verified external effects.
-An acknowledgement alone does not establish `BOUND`; a rejection or error
-alone does not establish `NO_BIND`. If a callback fails or returns an
-unusable result after dispatch, the SDK preserves an `UNKNOWN` recovery
-observation so a verifier can inspect the target. See the
-[failure and recovery guide](failure-and-recovery.md) for the resulting
-exceptions and recovery context.
+In particular:
 
-## Verification and effect
+```text
+ADMITTED != BOUND
+REFUSED  != NO_BIND
+```
 
-`CAGE.verify(execution, verifier=...)` asks an application verifier to
-observe the target using the execution record and its correlation data.
-The verifier must supply meaningful evidence appropriate to that target;
-CAGE checks record consistency but cannot certify the truth of a provider's
-claim. Verification leads to the following Effect states:
+---
 
-| Verification | Effect | Interpretation |
+## Consequence Custody
+
+For an `ADMITTED` or `NARROWED` Decision, the application may call:
+
+```python
+CAGE.execute(...)
+```
+
+CAGE then enters Consequence Custody.
+
+Custody checks the selected effect and the supplied `ExecutionCapability`
+before invoking the adapter.
+
+For `ADMITTED`:
+
+```text
+selected effect = original RequestedEffect
+```
+
+For `NARROWED`:
+
+```text
+selected effect = Decision.permitted_effect
+```
+
+The broader original request must not be substituted back in during execution.
+
+---
+
+## Evaluation Attempt vs ExecutionAttempt
+
+An evaluation `Attempt` and an `ExecutionAttempt` represent different events.
+
+```text
+Evaluation Attempt
+    -> one evaluation of a Consequence
+
+ExecutionAttempt
+    -> one identified attempt to carry an eligible Decision into execution
+```
+
+Therefore:
+
+```text
+Evaluation Attempt != ExecutionAttempt
+```
+
+Replay creates another evaluation Attempt.
+
+It does not create another external execution.
+
+---
+
+## Adapter observation
+
+The adapter attempts the selected external operation.
+
+It may report:
+
+```text
+ACKNOWLEDGED
+REJECTED
+ERROR
+UNKNOWN
+```
+
+These states describe what the adapter observed about the request.
+
+They do not establish the external Effect.
+
+```text
+ACKNOWLEDGED != BOUND
+REJECTED     != NO_BIND
+ERROR        != NO_BIND
+UNKNOWN      != EFFECT_UNKNOWN
+```
+
+For example, an acknowledged request may still fail later.
+
+Likewise, a timeout or callback error may occur after the external system has
+already applied the operation.
+
+This is why CAGE does not infer Effect from adapter status.
+
+If adapter processing fails after dispatch may have begun, the SDK can preserve
+an `UNKNOWN` recovery observation so the application can verify the target
+without sending the operation again.
+
+See [Failure and recovery](failure-and-recovery.md).
+
+---
+
+## Verification
+
+Verification examines external evidence after execution.
+
+The application calls:
+
+```python
+CAGE.verify(execution, verifier=...)
+```
+
+The verifier uses the execution record and its correlation data to inspect the
+target.
+
+CAGE checks that the returned verification belongs to the expected lineage.
+
+The verifier remains responsible for the quality and meaning of the external
+evidence.
+
+Verification produces:
+
+```text
+VERIFIED_BOUND
+VERIFIED_NO_BIND
+INCONCLUSIVE
+```
+
+These map to Effect states as follows:
+
+| Verification | Effect | Meaning |
 | --- | --- | --- |
-| `VERIFIED_BOUND` | `BOUND` | The verifier reports the intended selected effect became effective. |
-| `VERIFIED_NO_BIND` | `NO_BIND` | The verifier reports the selected effect did not become effective. |
-| `INCONCLUSIVE` | `EFFECT_UNKNOWN` | The available observation cannot establish either result. |
+| `VERIFIED_BOUND` | `BOUND` | Evidence supports that the selected Consequence became effective |
+| `VERIFIED_NO_BIND` | `NO_BIND` | Evidence supports that the selected Consequence did not become effective |
+| `INCONCLUSIVE` | `EFFECT_UNKNOWN` | The available evidence cannot establish either outcome |
 
-Before verification, do not infer an Effect state from the adapter report.
-`ADMITTED` is permission to try, not proof that a target changed. `REFUSED`
-blocks a CAGE-managed execution attempt, not proof of `NO_BIND` in all
-external systems.
+---
 
-The assurance contains an `EffectProof` and a `Warrant` linked to the
-decision and execution history. A decision-only Warrant can have a
-`DecisionProof` without an `EffectProof`; it does not imply execution.
-Portable JSON Warrants are detached views of this history; see the
-[portable Warrant guide](portable-warrants-and-cli.md) for disclosure and
-validation limits.
+## BOUND
 
-## Reconcile without another execution
+`BOUND` means authoritative verification supports the claim that the permitted
+Consequence became effective.
 
-When the first verification is inconclusive, call
-`CAGE.reconcile(previous_assurance, verifier=...)` to observe again. It
-uses the earlier execution and produces a new assurance snapshot whose
-Warrant names the preceding Warrant. It does not dispatch the adapter a
-second time. The [reconciliation walkthrough](reconciliation-walkthrough.md)
-shows one execution followed by a later bound observation.
+It should not be inferred from request submission or acknowledgement alone.
 
-Recovery after a process restart requires application-owned durable
-execution and correlation records. A portable Warrant file alone cannot
-restore the facade's dispatch guard or authorize an execution retry. Treat
-an unknown outcome as unknown until suitable verification resolves it.
+---
+
+## NO_BIND
+
+`NO_BIND` means authoritative verification supports the claim that the
+Consequence did not become effective.
+
+The following are not enough by themselves:
+
+```text
+adapter rejection
+execution error
+timeout
+missing response
+transport failure
+no acknowledgement
+```
+
+Those conditions may describe a failed or uncertain execution path.
+
+They do not necessarily describe external reality.
+
+---
+
+## EFFECT_UNKNOWN
+
+When verification cannot establish either outcome, CAGE uses:
+
+```text
+EFFECT_UNKNOWN
+```
+
+This is not an error state.
+
+It is an explicit representation of uncertainty.
+
+For example:
+
+```text
+adapter = ACKNOWLEDGED
+        |
+        v
+verification = INCONCLUSIVE
+        |
+        v
+Effect = EFFECT_UNKNOWN
+```
+
+CAGE keeps the uncertainty visible until stronger evidence becomes available.
+
+---
+
+## DecisionProof, EffectProof, and Warrant
+
+CAGE keeps Decision provenance and Effect provenance separate.
+
+A Decision-only Warrant may contain:
+
+```text
+DecisionProof
+EffectProof = absent
+```
+
+That means CAGE has an assurance record for the Decision, but no Effect has yet
+been established.
+
+This is different from:
+
+```text
+DecisionProof
+EffectProof(EFFECT_UNKNOWN)
+```
+
+In that case, execution and verification have occurred, but the external
+outcome remains unresolved.
+
+`EffectProof` connects the Effect to its verification lineage.
+
+A Warrant preserves the assurance state available at that point in time.
+
+Portable JSON Warrants are detached representations of this history.
+
+See [Portable Warrants and CLI](portable-warrants-and-cli.md).
+
+---
+
+## Reconciliation
+
+When a first verification returns:
+
+```text
+INCONCLUSIVE
+    ->
+EFFECT_UNKNOWN
+```
+
+the same execution can be observed again later.
+
+Use:
+
+```python
+CAGE.reconcile(previous_assurance, verifier=...)
+```
+
+Conceptually:
+
+```text
+existing execution
+    |
+    v
+Effect = EFFECT_UNKNOWN
+    |
+    v
+later evidence
+    |
+    v
+reconcile()
+    |
+    v
+new verification
+    |
+    v
+new Effect
+```
+
+Reconciliation does not invoke the adapter again.
+
+```text
+Reconciliation != Re-execution
+```
+
+A later Warrant links back to the previous Warrant, preserving the earlier
+assurance state.
+
+For a complete example, see the
+[Reconciliation walkthrough](reconciliation-walkthrough.md).
+
+---
+
+## Local lifecycle limits
+
+The v0.7 facade keeps dispatch and verification guards in memory.
+
+They apply within one Python process and one `CAGE` instance.
+
+They are not restored automatically after a restart and do not provide a
+distributed exactly-once guarantee.
+
+Applications that require durable recovery should maintain their own operation
+correlation and use target-system evidence to determine the outcome.
+
+A portable Warrant alone is not enough to resume execution.
+
+When the external outcome is unknown, keep it unknown until suitable
+verification resolves it.

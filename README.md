@@ -1,124 +1,75 @@
 # CAGE
 
-**CAGE — Control Assurance Governance Evaluation**
+**Control Assurance Governance Evaluation**
 
-CAGE is a vendor-neutral assurance layer at the business-consequence boundary for consequential AI and autonomous-agent actions.
+CAGE is a vendor-neutral assurance layer for consequential AI and automated
+actions.
 
-CAGE focuses on two distinct questions:
+It helps answer two different questions:
 
-1. **Should this proposed autonomous action be allowed to become a real-world business consequence?**
-2. **What can CAGE subsequently prove actually became effective in the external system?**
+1. Should this proposed action be allowed to cross into a real-world business
+   operation?
+2. After execution, what can we establish actually became effective?
 
-CAGE does not replace agent runtimes, IAM, authorization systems, policy engines, approval systems, guardrails, workflow systems, observability platforms, SIEM, cloud security controls, or provider execution platforms.
-
-Those systems may become assurance inputs, adapters, evidence sources, execution systems, or verification systems for CAGE.
-
----
-
-## Status
-
-The source code is licensed under [Apache License 2.0](LICENSE).
-
-The v0.7 developer SDK is released. The current package release is
-`v0.7.1`, which adds PyPI distribution metadata and Trusted Publishing
-without changing runtime semantics from `v0.7.0`. To run the
-local SQLite example from a source checkout, see the
-[v0.7 Quickstart](docs/quickstart.md).
-See the [integration guide](docs/integration-guide.md) for adapter, verifier,
-failure-recovery, and trust-boundary guidance, and the
-[release readiness review](docs/v0.7-release-readiness.md) for remaining gates.
-For errors and uncertain outcomes, see the
-[failure and recovery guide](docs/failure-and-recovery.md).
-For portable JSON Warrants and CLI inspection, see the
-[portable Warrant guide](docs/portable-warrants-and-cli.md).
-For the meaning of Decisions, execution observations, and Effects, see the
-[semantic guide](docs/semantic-guide.md).
-For proposed changes and security reports, see
-[CONTRIBUTING.md](CONTRIBUTING.md) and [SECURITY.md](SECURITY.md). Development
-changes are summarized in the [changelog](CHANGELOG.md).
-
-Release status:
-
-**v0.7.1 — PyPI Distribution**
-
-v0.7.1 adds polished Python package metadata and Trusted Publishing to
-PyPI. It does not change CAGE runtime semantics from v0.7.0.
-
-Previous feature release: **v0.7.0 — Developer Product**
-
-v0.7.0 added the facade, local examples, CLI, portable Warrant inspection,
-and developer integration guides.
-
-Previous core release: **v0.6.0 — Consequence Custody**
-
-v0.5 established the Generic Consequence Core: consequence identity, evaluation Attempts, normalized assurance inputs, Decision semantics, Effect semantics, replay, consequence-level idempotency, DecisionProof, EffectProof, and Warrant foundations.
-
-v0.6 extends that model across the controlled execution boundary so CAGE can preserve lineage from Decision through external execution observation, authoritative verification, Effect, and Warrant.
-
-The product remains pre-v1.0. Core semantics are being hardened before provider integrations, SaaS infrastructure, cryptographic signing, or enterprise deployment are added.
-
----
-
-## Core Idea
-
-Traditional security systems can establish that an authenticated and authorized principal or agent invoked an allowed operation.
-
-CAGE adds a separate assurance layer around the resulting business consequence.
-
-CAGE separates:
-
-1. what was proposed;
-2. what was evaluated;
-3. what CAGE permitted;
-4. what was attempted externally;
-5. what the execution system reported;
-6. what authoritative verification established;
-7. what evidence supports those claims.
-
-The central rule is:
+The distinction matters because:
 
 ```text
 Decision != Effect
 ```
 
-Related v0.6 separations are:
+An action can be permitted without ever taking effect.
 
-```text
-Evaluation Attempt != ExecutionAttempt
-Replay             != Execution Retry
-Adapter Result     != Effect
-Execution          != Verification
-Reconciliation     != Re-execution
-```
+Likewise, an execution request can fail, time out, or return an ambiguous
+response without proving that the intended business consequence did not occur.
+
+CAGE keeps those states separate and preserves the lineage and evidence needed
+to reason about them.
 
 ---
 
-## Core Model
+## Install
 
-```text
-Principal
-Agent
-Resource
-RequestedEffect
-        |
-        v
-      Action
-        |
-        v
-   Consequence
-        |
-        +---- Attempt A1
-        +---- Attempt A2
-        +---- Attempt A3
+Install the published package from PyPI:
+
+```bash
+python -m pip install cage-assurance
 ```
 
-A **Consequence** represents one intended business consequence.
+Confirm the CLI installation:
 
-An **Attempt** represents one evaluation of that Consequence.
+```bash
+cage --version
+```
 
-Multiple Attempts may refer to the same Consequence.
+Use the SDK from Python:
 
-v0.6 extends that lineage through custody:
+```python
+from cage import CAGE
+```
+
+Current package release:
+
+```text
+v0.7.1
+```
+
+Supported Python version:
+
+```text
+Python >= 3.11
+```
+
+CAGE currently has no production runtime dependencies outside the Python
+standard library.
+
+For a working example, start with the
+[v0.7 Quickstart](docs/quickstart.md).
+
+---
+
+## What CAGE provides
+
+CAGE gives developers a structured lifecycle for consequential operations:
 
 ```text
 Action
@@ -127,10 +78,7 @@ Action
 Consequence
   |
   v
-Attempt
-  |
-  v
-Evaluation
+Evaluation Attempt
   |
   v
 Decision
@@ -139,27 +87,19 @@ Decision
 DecisionProof
   |
   v
------------------------------
-     CONSEQUENCE CUSTODY
------------------------------
+Consequence Custody
   |
   v
 ExecutionAttempt
   |
   v
-EffectAdapter
+External Execution
   |
   v
-External System
+Execution Observation
   |
   v
-AdapterExecutionResult
-  |
-  v
-EffectVerifier
-  |
-  v
-EffectVerificationResult
+Verification
   |
   v
 Effect
@@ -171,11 +111,74 @@ EffectProof
 Warrant
 ```
 
+The architecture protects several important distinctions:
+
+```text
+Decision            != Effect
+Evaluation Attempt  != ExecutionAttempt
+Replay              != Execution Retry
+Adapter Result      != Effect
+Execution           != Verification
+Reconciliation      != Re-execution
+```
+
+These separations let CAGE reason about permission, execution, evidence, and
+external outcome without collapsing them into one status.
+
 ---
 
-## Evaluation Flow
+## Core terminology
 
-CAGE supports normalized assurance inputs:
+A few terms have specific meanings in CAGE.
+
+**Action**  
+The proposed operation, including the Principal, Agent, Resource, and
+RequestedEffect.
+
+**Consequence**  
+One intended business consequence. Its identity remains stable across
+evaluation, execution, verification, and reconciliation.
+
+**Attempt**  
+One evaluation of a Consequence.
+
+**Decision**  
+What CAGE permits for a particular evaluation Attempt.
+
+**DecisionProof**  
+The Decision together with references to the assurance inputs that supported
+it.
+
+**Consequence Custody**  
+The controlled boundary that carries an eligible Decision toward external
+execution.
+
+**ExecutionAttempt**  
+One identified attempt to carry a Decision into external execution. It is
+separate from an evaluation Attempt.
+
+**AdapterExecutionResult**  
+The adapter's observation about an execution request. It is not an Effect.
+
+**Effect**  
+What authoritative verification establishes about the resulting external
+business consequence.
+
+**EffectProof**  
+The Effect together with the verification lineage supporting it.
+
+**Warrant**  
+An assurance record preserving Decision provenance and, when available, Effect
+provenance.
+
+For the full model, see
+[Architecture](docs/architecture.md).
+
+---
+
+## Evaluation
+
+CAGE can evaluate normalized assurance inputs such as:
 
 - `Evidence`
 - `Standing`
@@ -201,7 +204,7 @@ Attempt
   +-- Context
   |
   v
-Deterministic Evaluation Rule
+Evaluation Rule
   |
   v
 EvaluationOutcome
@@ -213,64 +216,42 @@ Decision
 DecisionProof
 ```
 
-The supplied evaluation logic is responsible for interpreting domain-specific assurance requirements.
+The supplied evaluation logic decides how domain-specific assurance inputs are
+interpreted.
 
-Generic CAGE Core does not become a policy language, IAM system, or approval workflow engine.
+CAGE does not impose one universal policy language or one universal set of
+assurance requirements.
 
 There is no implicit allow.
 
----
-
-## Decision States
-
-CAGE defines five canonical Decision states:
-
-- `ADMITTED`
-- `HELD`
-- `NARROWED`
-- `ESCALATED`
-- `REFUSED`
-
-A Decision describes what CAGE permitted for a specific evaluation Attempt.
-
-`NO_BIND` is not a Decision state.
+An `ADMITTED` Decision must be produced explicitly by valid evaluation logic.
 
 ---
 
-## Effect States
+## Decision states
 
-CAGE defines three canonical Effect states:
-
-- `BOUND`
-- `NO_BIND`
-- `EFFECT_UNKNOWN`
-
-An Effect describes what authoritative verification has established about the external business consequence.
-
-CAGE must not claim `NO_BIND` merely because:
-
-- execution was not attempted;
-- an adapter rejected the request;
-- execution returned an error;
-- an API timed out;
-- a response was lost;
-- no acknowledgement was received;
-- transport failed.
-
-If external reality cannot be established, the correct state is:
+CAGE defines five Decision states:
 
 ```text
-EFFECT_UNKNOWN
+ADMITTED
+HELD
+NARROWED
+ESCALATED
+REFUSED
 ```
+
+A Decision describes what CAGE permits for a particular evaluation Attempt.
+
+It does not describe what happened in the external system.
+
+`NO_BIND`, for example, is not a Decision state.
 
 ---
 
 ## NARROWED Decisions
 
-A `NARROWED` Decision preserves both:
-
-- the originally requested effect;
-- an explicit `permitted_effect`.
+A `NARROWED` Decision preserves both the original request and the smaller
+effect CAGE permits.
 
 For example:
 
@@ -282,78 +263,24 @@ Permitted:
 Scoped Operator for 30 minutes
 ```
 
-Determining whether one effect is semantically more constrained than another is domain-specific and belongs to supplied evaluation logic.
+Whether one effect is genuinely narrower than another is domain-specific and
+belongs to the supplied evaluation logic.
 
-At custody time, only `permitted_effect` may reach the EffectAdapter.
+At execution time, only `permitted_effect` may reach the adapter.
 
-The broader original request must not be executed.
-
----
-
-## Safe Replay
-
-Replay means re-evaluating the same Consequence using a new evaluation Attempt.
-
-```text
-Consequence C1
-    |
-    +-- Attempt A1 -> ESCALATED
-    |
-    +-- Attempt A2 -> ADMITTED
-```
-
-Replay preserves the original Consequence and business intent.
-
-Replay does **not** execute the external action.
-
-Replay is distinct from execution retry and reconciliation.
-
----
-
-## Consequence-Level Idempotency
-
-CAGE treats idempotency as business-consequence safety rather than merely HTTP retry handling.
-
-```text
-same idempotency key
-+
-equivalent business intent
-=
-same Consequence
-```
-
-Reusing the same idempotency key for materially different business intent results in an explicit conflict.
-
-Current consequence equivalence considers:
-
-- action type;
-- principal identity;
-- resource identity;
-- requested effect.
-
-Attempt identity, agent identity, retry number, replay number, and proposed replacement Consequence identity do not independently create a new Consequence.
+The broader original request remains available for audit and lineage but is not
+executed.
 
 ---
 
 ## Consequence Custody
 
-Consequence Custody is the controlled boundary between a CAGE Decision and external mutation.
+A Decision does not automatically trigger external execution.
 
-Evaluation never automatically executes.
+An eligible Decision enters **Consequence Custody**, where CAGE controls the
+transition from permission to execution.
 
-Forbidden:
-
-```text
-evaluate_attempt()
-    |
-    v
-ADMITTED
-    |
-    v
-automatic external execution
-```
-
-Instead:
+Conceptually:
 
 ```text
 Decision
@@ -362,16 +289,22 @@ Decision
 ExecutionAttempt
     |
     v
-execute_under_custody()
+select_effect_for_custody()
+    |
+    v
+validate_capability_for_custody()
+    |
+    v
+EffectAdapter
+    |
+    v
+External System
 ```
 
-Custody carries an already-created Decision across a controlled execution boundary.
+Custody determines which effect may be executed and validates the scope of the
+execution authority before the adapter is invoked.
 
----
-
-## Custody Eligibility
-
-Current custody eligibility is:
+Current eligibility is:
 
 ```text
 ADMITTED
@@ -386,101 +319,58 @@ REFUSED
     -> custody ineligible
 ```
 
-Ineligible Decisions fail before EffectAdapter invocation.
+Ineligible Decisions stop before external execution.
 
 ---
 
 ## ExecutionAttempt
 
-`ExecutionAttempt` is distinct from the evaluation `Attempt`.
+An `ExecutionAttempt` is not the same thing as an evaluation `Attempt`.
 
 An evaluation Attempt means:
 
-> one evaluation of a Consequence.
+> one evaluation of a Consequence
 
 An ExecutionAttempt means:
 
-> one identified attempt to carry an eligible Decision into external execution.
+> one identified attempt to carry an eligible Decision into external execution
 
-Current ExecutionAttempt lineage includes:
+This distinction allows CAGE to keep replay and execution retry separate.
 
-```text
-execution_attempt_id
-decision
-optional previous_execution_attempt_id
-```
+A replay creates another evaluation Attempt.
 
-Execution retry is therefore not the same thing as replay.
+An explicitly supported execution retry would create another ExecutionAttempt
+while preserving the same Consequence.
 
 ---
 
 ## ExecutionCapability
 
-`ExecutionCapability` models the structural scope of execution authority.
+`ExecutionCapability` represents the scope of authority presented to custody.
 
-Current minimal fields are:
+Its current scope includes:
 
 ```text
-capability_id
 consequence_id
 action_type
 resource_id
 ```
 
-Custody validates that the capability matches:
+The capability must match the Consequence, action type, and Resource being
+executed.
 
-```text
-same consequence_id
-same action_type
-same resource_id
-```
+It is not a credential container.
 
-The capability model deliberately does not contain provider credential material such as:
-
-- OAuth tokens;
-- API keys;
-- passwords;
-- cloud credentials;
-- IAM policies;
-- secrets.
-
-CAGE models execution-authority scope without becoming a credential vault or IAM system.
+Provider-specific tokens, passwords, API keys, roles, IAM policies, and other
+credential material remain outside generic CAGE Core.
 
 ---
 
-## EffectAdapter
+## Execution observations
 
-`EffectAdapter` is the vendor-neutral execution boundary.
+`EffectAdapter` attempts the external mutation.
 
-Conceptually:
-
-```python
-class EffectAdapter(Protocol):
-    def execute(
-        self,
-        *,
-        execution_attempt: ExecutionAttempt,
-        effect: RequestedEffect,
-        capability: ExecutionCapability,
-    ) -> AdapterExecutionResult:
-        ...
-```
-
-The adapter receives:
-
-- the exact ExecutionAttempt;
-- the exact selected effect;
-- the validated ExecutionCapability.
-
-It attempts the external mutation.
-
-It does not decide whether execution is allowed and does not determine Effect truth.
-
----
-
-## AdapterExecutionResult
-
-The current adapter states are:
+The adapter returns an `AdapterExecutionResult` with one of these states:
 
 ```text
 ACKNOWLEDGED
@@ -489,9 +379,9 @@ ERROR
 UNKNOWN
 ```
 
-These are request-level execution observations only.
+These are observations about the execution request.
 
-The following mappings are forbidden:
+They are not Effect states.
 
 ```text
 ACKNOWLEDGED != BOUND
@@ -500,27 +390,29 @@ ERROR        != NO_BIND
 UNKNOWN      != EFFECT_UNKNOWN
 ```
 
-Adapter status cannot substitute for authoritative external-state verification.
+For example, an external system may acknowledge a request before the business
+change is actually visible.
+
+An error response can also be ambiguous: the request may have reached the
+external system even if the caller did not receive a successful response.
+
+CAGE therefore verifies the resulting external state separately.
 
 ---
 
-## Authoritative Verification
+## Authoritative verification
 
-Execution and verification are separate responsibilities.
+Execution and verification have different jobs.
 
-Conceptually:
+```text
+EffectAdapter
+    -> attempts the external mutation
 
-```python
-class EffectVerifier(Protocol):
-    def verify(
-        self,
-        *,
-        adapter_result: AdapterExecutionResult,
-    ) -> EffectVerificationResult:
-        ...
+EffectVerifier
+    -> examines what became true afterward
 ```
 
-Verification states are:
+Verification produces one of three results:
 
 ```text
 VERIFIED_BOUND
@@ -528,7 +420,7 @@ VERIFIED_NO_BIND
 INCONCLUSIVE
 ```
 
-Effect creation is explicit:
+Those results map to CAGE Effect states:
 
 ```text
 VERIFIED_BOUND
@@ -541,21 +433,103 @@ INCONCLUSIVE
     -> EFFECT_UNKNOWN
 ```
 
-Only an `EffectVerificationResult` can produce an Effect through `create_effect_from_verification()`.
-
-There is deliberately no direct:
+There is no direct:
 
 ```text
 AdapterExecutionResult -> Effect
 ```
 
-conversion.
+shortcut.
+
+---
+
+## Effect states
+
+CAGE defines three Effect states.
+
+### BOUND
+
+`BOUND` means authoritative verification supports the conclusion that the
+permitted Consequence became effective.
+
+An API acknowledgement or successful request submission is not enough by
+itself.
+
+### NO_BIND
+
+`NO_BIND` means authoritative verification supports the conclusion that the
+intended Consequence did not become effective.
+
+A timeout, rejected request, transport failure, or missing response does not
+automatically establish `NO_BIND`.
+
+### EFFECT_UNKNOWN
+
+`EFFECT_UNKNOWN` means the available evidence cannot establish either
+`BOUND` or `NO_BIND`.
+
+CAGE preserves that uncertainty instead of turning an incomplete observation
+into a stronger assurance claim.
+
+---
+
+## Replay
+
+Replay re-evaluates an existing Consequence.
+
+```text
+Consequence C1
+    |
+    +-- Attempt A1 -> ESCALATED
+    |
+    +-- Attempt A2 -> ADMITTED
+```
+
+The Consequence and business intent remain the same while a new evaluation
+Attempt is created.
+
+Replay does not execute the external operation.
+
+```text
+Replay != Execution Retry
+```
+
+---
+
+## Consequence-level idempotency
+
+CAGE treats idempotency as protection of the business Consequence, not simply
+as HTTP retry handling.
+
+```text
+same idempotency key
++
+equivalent business intent
+=
+same Consequence
+```
+
+Reusing the same key for materially different business intent produces an
+explicit conflict.
+
+Current business-intent equivalence includes:
+
+- action type;
+- Principal identity;
+- Resource identity; and
+- RequestedEffect.
+
+Evaluation attempts, agent sessions, retry counters, and replay counters do not
+by themselves create a new Consequence.
 
 ---
 
 ## Reconciliation
 
-Reconciliation re-checks external reality using an existing `AdapterExecutionResult`.
+Sometimes execution has already happened but external reality cannot yet be
+established.
+
+CAGE can verify that same execution again later:
 
 ```text
 existing AdapterExecutionResult
@@ -565,13 +539,21 @@ EffectVerifier
         |
         v
 new EffectVerificationResult
+        |
+        v
+new Effect
+        |
+        v
+new Warrant
 ```
 
-Reconciliation does not execute.
+Reconciliation does not send the external operation again.
 
-It does not create an evaluation replay or execution retry.
+```text
+Reconciliation != Re-execution
+```
 
-A typical lineage is:
+For example:
 
 ```text
 one external execution
@@ -581,154 +563,113 @@ AdapterExecutionResult R1
         |
         +-- Verification V1 = INCONCLUSIVE
         |       |
-        |       +-- Effect E1 = EFFECT_UNKNOWN
+        |       +-- Effect = EFFECT_UNKNOWN
         |       +-- Warrant W1
         |
         +-- later reconciliation
                 |
                 +-- Verification V2 = VERIFIED_BOUND
                         |
-                        +-- Effect E2 = BOUND
+                        +-- Effect = BOUND
                         +-- Warrant W2
                             previous_warrant_id = W1
 ```
 
-The same Consequence, ExecutionAttempt, and AdapterExecutionResult lineage is preserved.
+The external execution happened once.
 
-Reconciliation changes CAGE's knowledge of reality. It does not cause reality to be executed again.
+What changed later was the evidence available to CAGE.
 
 ---
 
-## Warrant and Proof Lineage
+## Warrants
 
-A CAGE Warrant preserves the available assurance state for a Consequence.
+A Warrant preserves an assurance view of a Consequence.
 
-`DecisionProof` and `EffectProof` remain separate.
+`DecisionProof` and `EffectProof` remain separate because permission and
+external outcome are separate facts.
 
-A Warrant may legitimately exist with:
+A Warrant can therefore exist before an Effect has been established:
 
 ```text
 DecisionProof
 EffectProof = absent
 ```
 
-That state is different from:
+That is different from:
 
 ```text
 DecisionProof
 EffectProof(EFFECT_UNKNOWN)
 ```
 
-`EffectProof` is verification-backed and carries lineage to:
+In the second case, execution and verification have occurred, but external
+reality remains unresolved.
+
+When EffectProof is available, the Warrant preserves execution and verification
+lineage.
+
+Later Warrants can link to earlier Warrants through:
 
 ```text
-verification_id
-adapter_result_id
-execution_attempt_id
+previous_warrant_id
 ```
 
-When an EffectProof exists, Warrant derives:
-
-```text
-consequence_id
-action_id
-attempt_id
-execution_attempt_id
-adapter_result_id
-verification_id
-```
-
-A later Warrant may reference an earlier Warrant through `previous_warrant_id`.
-
-Earlier assurance history is not rewritten.
+Earlier assurance records are not rewritten when new evidence becomes
+available.
 
 ---
 
-## Domain Neutrality
+## Vendor and domain neutrality
 
-The same Generic Consequence Core supports materially different consequence types.
+CAGE Core is designed to stay independent of a particular:
 
-Tests include examples such as:
+- cloud provider;
+- AI model;
+- agent framework;
+- IAM platform;
+- policy engine;
+- policy language;
+- execution provider; or
+- business domain.
 
-```text
-database.delete
-access.grant
-payment.release
-```
+Provider and domain-specific behavior enters through evaluation logic,
+normalized inputs, adapters, verifiers, and other integration boundaries.
 
-There is no database-specific, access-specific, or payment-specific production logic inside generic CAGE Core.
+CAGE does not attempt to replace the systems around it.
 
-Domain-specific parameters are carried through `RequestedEffect.parameters` and interpreted by supplied evaluation logic.
-
----
-
-## Vendor Neutrality
-
-CAGE Core does not depend on:
-
-- AWS
-- Azure
-- GCP
-- MCP
-- OpenAI
-- Anthropic
-- any specific AI model
-- any specific agent runtime
-- any specific IAM system
-- any specific policy engine
-- any specific policy language
-- any specific execution provider
-
-Provider-specific identity, policy, approval, risk, observability, execution, and security systems should integrate through normalized inputs and external boundaries rather than being recreated inside Core.
+Identity systems, policy engines, approval systems, agent runtimes, execution
+platforms, observability systems, and cloud-security controls can instead
+provide inputs or integrations to CAGE.
 
 ---
 
-## Local Operation
+## Developer documentation
 
-CAGE currently has no production runtime dependencies outside the Python standard library.
+For implementation and integration work, start with:
 
-Requirements:
+- [Quickstart](docs/quickstart.md)
+- [Integration guide](docs/integration-guide.md)
+- [Semantic guide](docs/semantic-guide.md)
+- [Failure and recovery](docs/failure-and-recovery.md)
+- [Portable Warrants and CLI](docs/portable-warrants-and-cli.md)
 
-```text
-Python >= 3.11
-```
+For the underlying architecture:
 
-Development uses:
+- [Architecture](docs/architecture.md)
+- [Core invariants](docs/invariants.md)
+- [Consequence Custody](docs/v0.6-consequence-custody.md)
+- [v0.6 Definition of Done](docs/definition-of-done.md)
+- [v0.7 public API](docs/v0.7-public-api.md)
 
-```text
-pytest
-```
+Project governance:
 
-CAGE Core does not require CAGE Cloud or any hosted CAGE service.
-
----
-
-## Installation from PyPI
-
-Install the published CAGE package:
-
-```powershell
-python -m pip install cage-assurance
-```
-
-Confirm the CLI installation:
-
-```powershell
-cage --version
-```
-
-Use the developer SDK from Python:
-
-```python
-from cage import CAGE
-```
-
-CAGE currently has no production runtime dependencies outside the Python
-standard library.
+- [Contributing](CONTRIBUTING.md)
+- [Security](SECURITY.md)
+- [Changelog](CHANGELOG.md)
 
 ---
 
-## Installation for Development
+## Development setup
 
 Clone the repository and create a virtual environment.
 
@@ -736,27 +677,12 @@ On Windows PowerShell:
 
 ```powershell
 python -m venv .venv
-```
-
-Activate it:
-
-```powershell
 .\.venv\Scripts\Activate.ps1
-```
-
-Upgrade pip:
-
-```powershell
 python -m pip install --upgrade pip
-```
-
-Install CAGE in editable mode with development dependencies:
-
-```powershell
 python -m pip install -e ".[dev]"
 ```
 
-Run the test suite:
+Run the full test suite:
 
 ```powershell
 python -m pytest -q
@@ -764,110 +690,59 @@ python -m pytest -q
 
 ---
 
-## Current Core Modules
+## Release status
 
-```text
-action.py
-adapter.py
-assurance.py
-attempt.py
-capability.py
-consequence.py
-custody.py
-decision.py
-effect.py
-evaluation.py
-execution.py
-idempotency.py
-identity.py
-replay.py
-verification.py
-warrant.py
-```
+Current package release:
 
----
+**v0.7.1 — PyPI Distribution**
 
-## v0.6 Scope
+v0.7.1 publishes CAGE through PyPI and adds Trusted Publishing support. It does
+not change runtime semantics from v0.7.0.
 
-v0.6 includes:
+Previous feature release:
 
-- generic Principal, Agent, and Resource identity contracts;
-- generic Action and RequestedEffect;
-- stable Consequence identity;
-- evaluation Attempt identity;
-- normalized assurance inputs;
-- canonical Decision semantics;
-- canonical Effect semantics;
-- deterministic evaluation orchestration;
-- no-implicit-allow behavior;
-- `NARROWED` permitted-effect semantics;
-- safe replay;
-- consequence-level idempotency;
-- DecisionProof;
-- ExecutionAttempt identity;
-- custody eligibility;
-- scoped ExecutionCapability;
-- EffectAdapter;
-- AdapterExecutionResult;
-- explicit custody execution orchestration;
-- EffectVerifier;
-- EffectVerificationResult;
-- authoritative Effect creation;
-- reconciliation;
-- verification-backed EffectProof;
-- Warrant execution and verification lineage;
-- previous-Warrant lineage;
-- explicit uncertainty.
+**v0.7.0 — Developer Product**
+
+v0.7.0 introduced the developer-facing SDK, facade, local examples, CLI,
+portable Warrant inspection, and integration guidance.
+
+Previous core release:
+
+**v0.6.0 — Consequence Custody**
+
+v0.6 established the controlled execution boundary, authoritative
+verification, explicit uncertainty, reconciliation, and execution/verification
+lineage.
+
+The earlier v0.5 release established the Generic Consequence Core, including
+Consequence identity, evaluation Attempts, Decision semantics, replay,
+consequence-level idempotency, and proof foundations.
+
+CAGE remains pre-v1.0.
 
 ---
 
-## Not Included in v0.6
+## Current product boundary
 
-v0.6 does not implement:
+The current release provides the local developer SDK and generic assurance
+model.
 
-- CAGE Cloud;
-- SaaS;
-- billing;
-- REST APIs;
-- database persistence;
-- AWS-, Azure-, or GCP-specific production adapters;
-- MCP integration;
-- provider credential custody;
-- broad execution retry orchestration;
-- cryptographic Warrant signatures;
-- canonical Warrant serialization;
-- independent cryptographic Warrant verification;
-- HSM or KMS integration;
-- post-quantum cryptography;
-- AI risk intelligence;
-- enterprise deployment;
-- a new IAM system;
-- a new policy language;
-- full consequence graphs;
-- advanced consequence lineage.
+CAGE does not yet include a hosted SaaS control plane, provider-specific
+production suites, cryptographic Warrant signing, HSM/KMS integration,
+post-quantum signing, or enterprise deployment infrastructure.
 
-Those capabilities belong to later releases or integration packages.
+Those capabilities belong to later stages of the roadmap.
+
+The current focus is keeping the core semantics stable while improving the
+developer experience and integration model.
 
 ---
 
-## Documentation
+## License
 
-The current architecture is defined in:
+CAGE source code is licensed under the
+[Apache License 2.0](LICENSE).
 
-```text
-docs/architecture.md
-docs/invariants.md
-docs/v0.6-consequence-custody.md
-```
+For security issues, see [SECURITY.md](SECURITY.md).
 
-These documents define the intended v0.6 semantic boundary and non-negotiable invariants.
-
----
-
-## Project Principle
-
-When deciding whether functionality belongs inside CAGE Core, ask:
-
-> Does this preserve CAGE's ability to control whether a consequential autonomous action may cross into external execution and to prove what actually became effective without collapsing identity, evaluation, execution, verification, or proof?
-
-If not, it probably belongs outside generic Core.
+For contributions, see [CONTRIBUTING.md](CONTRIBUTING.md).

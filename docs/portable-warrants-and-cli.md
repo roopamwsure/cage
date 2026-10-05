@@ -1,142 +1,456 @@
 # Portable Warrants and the `cage` CLI
 
-Portable Warrant v1 is a versioned JSON inspection view of a CAGE evaluation
-or completed assurance. It is detached data: loading it does not recreate an
-`ExecutionResult`, restore the facade's in-memory dispatch history, grant
-authority, or contact the target. The exact field and state contract is in
-the [v0.7 public API](v0.7-public-api.md), sections 18–21.
+Portable Warrant v1 is a versioned JSON representation of a CAGE Decision or
+completed assurance state.
 
-## Create and inspect a local record
+It is designed for inspection, storage, exchange, and tooling.
 
-From a source checkout with an active virtual environment, install the
-current branch once with `python -m pip install -e .` as described in the
-[Quickstart](quickstart.md). To test a locally built wheel in a clean
-environment, install its path with `python -m pip install --no-deps PATH_TO_WHEEL`.
-The v0.7 package has not been published to PyPI.
+A portable Warrant is detached data. Loading one does not:
 
-In PowerShell, use a new filename for each example because export refuses an
-existing file by default:
+- recreate an `ExecutionResult`;
+- restore the facade's in-memory dispatch history;
+- recreate an `ExecutionCapability`;
+- authorize execution; or
+- contact the external target.
+
+For the exact field and state contract, see sections 18–21 of the
+[v0.7 Public API](v0.7-public-api.md).
+
+---
+
+## Create and inspect a local Warrant
+
+Install the published package:
+
+```powershell
+python -m pip install cage-assurance
+```
+
+Confirm the CLI:
 
 ```powershell
 cage --version
 cage --help
+```
+
+Run an example and export its final Warrant:
+
+```powershell
 cage example database.delete --warrant .\delete-warrant.json
+```
+
+Then inspect and validate it:
+
+```powershell
 cage warrant inspect .\delete-warrant.json
 cage warrant validate .\delete-warrant.json
 ```
 
-You can replace `database.delete` with `access.grant` or `payment.release`.
-Each command runs a disposable local fixture, with no account, credentials,
-or live business system. The exported file records the **final** assurance
-snapshot at SUMMARY disclosure. `payment.release` prints an inconclusive
-first observation and a later bound observation with one adapter dispatch.
-Its exported final Warrant names the earlier Warrant as a predecessor but
-does not contain that earlier snapshot.
+You can also use:
 
-`inspect` prints identifiers, Decision and Effect states, adapter and
-verification states, disclosure, origin, and unresolved lineage warnings.
-It escapes control characters in displayed identifiers. It does not print
-action parameters or reference values by default, even when the file was
-exported as FULL. Identifiers and action types may
-themselves reveal information if an application assigns sensitive values.
-`validate` reports structural validity, disclosed omissions, and warnings;
-it does not verify that a target system changed, remains changed, or that
-the record came from a trusted signer.
+```text
+access.grant
+payment.release
+```
 
-## Export from an application
+The examples use local disposable fixtures. They do not require cloud
+credentials, external accounts, or a live business system.
 
-Import the functions from `cage.warrants`. Given an `EvaluationResult` or
-`AssuranceResult` returned by the public facade:
+Use a new output filename for each run unless you explicitly intend to replace
+an existing file.
+
+By default, exported Warrants use `SUMMARY` disclosure.
+
+The `payment.release` example demonstrates an inconclusive first observation
+followed by later reconciliation to `BOUND`, while keeping a single external
+dispatch.
+
+Its final exported Warrant references the earlier Warrant through
+`previous_warrant_id`. The earlier snapshot is not embedded inside the later
+file.
+
+---
+
+## Inspecting a Warrant
+
+`cage warrant inspect PATH` displays the main assurance metadata, including:
+
+- identifiers;
+- Decision state;
+- Effect state;
+- adapter state;
+- verification state;
+- disclosure mode;
+- observation origin; and
+- lineage warnings.
+
+The command does not print action parameters or reference values by default,
+even when the file was exported using `FULL` disclosure.
+
+It also escapes control characters in displayed identifiers.
+
+That does not make the output anonymous. Identifiers and action types can still
+be sensitive if an application places business information inside them.
+
+---
+
+## Validating a Warrant
+
+Use:
+
+```powershell
+cage warrant validate .\delete-warrant.json
+```
+
+Validation checks whether the portable record is structurally and semantically
+consistent with the v1 format.
+
+It can detect problems such as:
+
+- missing or unknown fields;
+- invalid state combinations;
+- broken lineage references within the record;
+- invalid disclosure metadata;
+- unsupported format versions; and
+- malformed field values.
+
+Validation does **not** establish that:
+
+- the external system actually changed;
+- the external state is still current;
+- the verifier's external claim was truthful;
+- the file came from a trusted party; or
+- the file has cryptographic integrity.
+
+In other words:
+
+```text
+valid portable Warrant
+!=
+verified external truth
+```
+
+and:
+
+```text
+valid portable Warrant
+!=
+authenticated Warrant
+```
+
+Cryptographic authenticity is outside the v0.7 portable format.
+
+---
+
+## Exporting from an application
+
+Import the Warrant helpers from `cage.warrants`:
 
 ```python
-from cage.warrants import WarrantDisclosure, dump_warrant, export_warrant
+from cage.warrants import (
+    WarrantDisclosure,
+    dump_warrant,
+    export_warrant,
+)
+```
 
-document = export_warrant(assurance)  # SUMMARY by default
+Given an `AssuranceResult` returned by `verify()` or `reconcile()`:
+
+```python
+document = export_warrant(assurance)
 dump_warrant(document, "assurance-warrant.json")
-
-# Explicit FULL disclosure can contain business data and reference values.
-full = export_warrant(assurance, disclosure=WarrantDisclosure.FULL)
 ```
 
-Here `assurance` is an existing `AssuranceResult`, for example the result of
-`cage.verify(...)` or `cage.reconcile(...)`. You may instead export an
-`EvaluationResult` for a decision-only record, or an internally consistent
-core `Warrant`. An `ExecutionResult` is not an export source. Export never
-dispatches an adapter or invokes a verifier.
+`SUMMARY` is the default disclosure mode.
 
-`dump_warrant()` validates and serializes before touching its destination,
-uses UTF-8, does not create missing parent directories, and refuses an
-existing path unless `overwrite=True`. Replacing a file explicitly does not
-imply that the new record supersedes it in the target system. Preserve
-historical snapshots when investigating uncertain effects.
-
-## Read, validate, and share carefully
+To export the supported full record:
 
 ```python
-from cage.warrants import load_warrant, parse_warrant, validate_warrant
-
-detached = load_warrant("assurance-warrant.json")
-print(detached.warrant_id, detached.decision_state, detached.effect_state)
-report = validate_warrant(detached)
-for issue in report.issues:
-    print(issue.severity, issue.code, issue.path, issue.message)
-
-# For data already in memory, parse_warrant(json_text_or_utf8_bytes) raises
-# WarrantFormatError on malformed content.
+full = export_warrant(
+    assurance,
+    disclosure=WarrantDisclosure.FULL,
+)
 ```
 
-`load_warrant()` raises for invalid data. `validate_warrant()` returns a
-`WarrantValidationReport`; malformed content is reported through error
-issues, while an unsupported input *argument type* raises `CAGETypeError`.
-Valid records can also carry warnings. In SUMMARY, hidden verification
-reference contents cannot be compared; predecessor IDs name records outside
-the file and are reported as unresolved. A warning does not make a
-structurally consistent file invalid.
+`FULL` can contain business-sensitive values and references.
 
-| Disclosure | Parameters and subject/resource IDs | Proof reference arrays | What is still visible |
+`export_warrant()` can also export:
+
+- an `EvaluationResult`, producing a Decision-only record; or
+- an internally consistent Core `Warrant`.
+
+An `ExecutionResult` is not a valid export source.
+
+Exporting never calls an adapter or verifier.
+
+---
+
+## Writing files safely
+
+`dump_warrant()` validates and serializes the portable record before writing
+the destination.
+
+It:
+
+- writes UTF-8;
+- does not create missing parent directories automatically; and
+- refuses to replace an existing file unless `overwrite=True` is supplied.
+
+For example:
+
+```python
+dump_warrant(
+    document,
+    "assurance-warrant.json",
+    overwrite=True,
+)
+```
+
+Replacing a local JSON file does not mean the new assurance record supersedes
+the old one in the external system.
+
+When investigating uncertain outcomes, preserve earlier snapshots whenever
+their history matters.
+
+---
+
+## Reading a portable Warrant
+
+Use:
+
+```python
+from cage.warrants import (
+    load_warrant,
+    parse_warrant,
+    validate_warrant,
+)
+```
+
+For a file:
+
+```python
+detached = load_warrant("assurance-warrant.json")
+
+print(
+    detached.warrant_id,
+    detached.decision_state,
+    detached.effect_state,
+)
+```
+
+For JSON already held in memory:
+
+```python
+detached = parse_warrant(json_text_or_utf8_bytes)
+```
+
+Malformed portable data raises `WarrantFormatError`.
+
+An unsupported format version raises
+`UnsupportedWarrantVersionError`.
+
+File access problems are reported through `WarrantIOError`.
+
+---
+
+## Validation reports
+
+`validate_warrant()` returns a `WarrantValidationReport`.
+
+For example:
+
+```python
+report = validate_warrant(detached)
+
+for issue in report.issues:
+    print(
+        issue.severity,
+        issue.code,
+        issue.path,
+        issue.message,
+    )
+```
+
+Malformed record content is represented through validation issues.
+
+An invalid API argument type is different and raises `CAGETypeError`.
+
+A record may be structurally valid and still contain warnings.
+
+For example, a `SUMMARY` Warrant may intentionally omit verification reference
+contents, so those values cannot be compared.
+
+Likewise, `previous_warrant_id` can refer to a Warrant that is not contained in
+the current file.
+
+That unresolved predecessor reference is not automatically a validation
+failure.
+
+---
+
+## SUMMARY and FULL disclosure
+
+Portable Warrant v1 supports two disclosure modes.
+
+| Disclosure | Parameters and subject/resource IDs | Proof reference arrays | Still visible |
 | --- | --- | --- | --- |
-| SUMMARY (default) | Specified fields become null | Specified arrays become null, with paths listed in `disclosure.omitted_fields` | IDs, action type, states, origin, reference counts, predecessor IDs |
-| FULL | Supported Warrant values preserved | Arrays retain order and duplicates; omitted-fields list empty | All supported values, including potentially sensitive business data |
+| `SUMMARY` | Selected fields become `null` | Selected arrays become `null`; their paths appear in `disclosure.omitted_fields` | IDs, action type, states, origin, reference counts, predecessor IDs |
+| `FULL` | Supported Warrant values are preserved | Arrays retain their values, order, and duplicates | All supported portable values, including potentially sensitive business data |
 
-SUMMARY is disclosure, not anonymization. FULL does not include adapter
-credentials or assurance-input payloads that were never in the native
-Warrant. Protect either file in proportion to the identifiers and values it
-contains. A parsed document is not a proof of authenticity or a safe way to
-resume an interrupted operation.
+`SUMMARY` reduces disclosure.
 
-## Format compatibility and migration
+It is not anonymization.
 
-Portable v1 requires `format="cage.warrant"` and `format_version="1"`.
-The native Warrant's `schema_version` is separate metadata. The reader
-rejects duplicate JSON keys, invalid UTF-8, nonfinite numbers, unknown or
-missing fields, unsupported versions, inconsistent links and states, and
-undisclosed omissions. Input and serialized output are limited to 8 MiB
-of UTF-8 JSON and nesting depth 64. `PortableWarrant.to_dict()` returns
-a fresh JSON-compatible copy; `to_json()` is for display or storage, not
-cryptographic canonicalization.
+A SUMMARY Warrant can still expose information through identifiers, action
+types, states, counts, timestamps or lineage values, depending on the record.
 
-v0.6 core Warrants are runtime objects, not portable v1 files. The v0.7
-SDK adds export and readback without changing a v0.6 application's core
-imports. A bare legacy core Warrant that has no separate origin field is
-stored with `adapter_result.origin="unspecified"`, unless the reserved SDK
-recovery marker establishes recovery provenance. The detached object's
-`observation_origin` property is `None` for that unspecified case.
+`FULL` preserves more of the native Warrant data supported by portable v1.
 
-Format v1 is closed: adding or reinterpreting fields requires a new
-format version and explicit migration guidance. A v1 reader rejects a
-future format version rather than guessing its meaning. No signature,
-hashing profile, key identity, or cryptographic authenticity check is
-provided in v0.7.
+It does not add credentials, assurance-input payloads, or other data that was
+never present in the native Warrant.
+
+Both formats should be protected according to the sensitivity of the
+information they contain.
+
+---
+
+## What a portable Warrant does not contain
+
+A portable Warrant is an assurance artifact, not an execution token.
+
+It does not recreate:
+
+```text
+ExecutionCapability
+live adapter state
+live verifier state
+facade dispatch reservations
+external credentials
+restart authorization
+```
+
+Loading a Warrant therefore does not make it safe to resume an interrupted
+operation.
+
+If execution may already have occurred, determine the outcome through durable
+application correlation and target-system evidence.
+
+---
+
+## Format compatibility
+
+Portable Warrant v1 uses:
+
+```text
+format = "cage.warrant"
+format_version = "1"
+```
+
+The native Warrant's `schema_version` is separate metadata.
+
+The v1 reader rejects:
+
+- duplicate JSON keys;
+- invalid UTF-8;
+- non-finite numbers;
+- missing fields;
+- unknown fields;
+- unsupported format versions;
+- inconsistent lineage or state combinations; and
+- disclosure inconsistencies.
+
+Input and serialized output are limited to:
+
+```text
+8 MiB UTF-8 JSON
+nesting depth 64
+```
+
+`PortableWarrant.to_dict()` returns a fresh JSON-compatible representation.
+
+`to_json()` provides JSON for display or storage.
+
+It is not a cryptographic canonicalization format.
+
+---
+
+## Relationship to v0.6 Warrants
+
+v0.6 Core Warrants are runtime objects.
+
+Portable Warrant v1 was added in the v0.7 developer SDK as a detached JSON
+representation.
+
+This does not change the existing v0.6 Core object model or imports.
+
+A legacy Core Warrant without a separate observation-origin field is exported
+with:
+
+```text
+adapter_result.origin = "unspecified"
+```
+
+unless the reserved SDK recovery marker establishes `SDK_RECOVERY`
+provenance.
+
+For an unspecified origin, the detached object's `observation_origin` property
+is `None`.
+
+---
+
+## Format evolution
+
+Portable Warrant v1 is a closed format.
+
+Existing v1 fields should not be silently reinterpreted.
+
+If a future release needs incompatible fields or semantics, it should use a new
+format version together with explicit migration guidance.
+
+A v1 reader rejects a future unsupported version instead of guessing how to
+interpret it.
+
+v0.7 does not provide:
+
+- Warrant signatures;
+- hashing profiles;
+- signer identity;
+- trust-chain validation; or
+- cryptographic authenticity checking.
+
+Those belong to later cryptographic Warrant work.
+
+---
 
 ## CLI exit codes
 
+The CLI uses these exit codes:
+
 | Code | Meaning |
 | --- | --- |
-| `0` | Command completed; for validation, the record is structurally valid |
-| `1` | File access or example/runtime failure |
-| `2` | Invalid arguments or invalid/unsupported portable record |
+| `0` | Command completed successfully; for validation, the portable record is structurally valid |
+| `1` | File access, example, or runtime failure |
+| `2` | Invalid command arguments or an invalid/unsupported portable record |
 
-An example may finish successfully while displaying `EFFECT_UNKNOWN`;
-exit `0` alone never means `BOUND`. CLI errors are summarized on stderr
-without provider tracebacks. For SDK error classes and observation-only
-recovery, see the [failure and recovery guide](failure-and-recovery.md).
+An example can exit with `0` while its Effect is:
+
+```text
+EFFECT_UNKNOWN
+```
+
+Therefore:
+
+```text
+CLI exit 0 != BOUND
+```
+
+A successful CLI command means the command completed according to its own
+contract.
+
+It does not strengthen the assurance represented by the Warrant.
+
+CLI errors are summarized on stderr without exposing provider tracebacks or
+business payloads by default.
+
+For SDK recovery behavior, see
+[Failure and recovery](failure-and-recovery.md).

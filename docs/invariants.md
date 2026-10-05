@@ -1,10 +1,16 @@
 # CAGE v0.6 Invariants
 
-These invariants define non-negotiable behavior for the Generic Consequence Core and the v0.6 Consequence Custody boundary.
+These invariants define non-negotiable behavior for the Generic Consequence
+Core and the v0.6 Consequence Custody boundary.
+
+For definitions of the core terms used here, see
+[Core Terminology](architecture.md#core-terminology).
+
+---
 
 ## Invariant 1 — Decision and Effect are independent
 
-A Decision does not determine the Effect.
+A Decision and an Effect describe different parts of the lifecycle.
 
 ```text
 ADMITTED != BOUND
@@ -13,38 +19,45 @@ REFUSED  != NO_BIND
 
 A Decision records what CAGE permitted for an evaluation Attempt.
 
-An Effect records what authoritative verification established about external reality.
+An Effect records what authoritative verification established about the
+external business consequence.
 
-These are different assurance dimensions.
+One cannot be inferred directly from the other.
 
 ---
 
 ## Invariant 2 — NO_BIND requires authoritative evidence
 
-CAGE must not assert `NO_BIND` merely because:
+`NO_BIND` is a positive assurance claim that the intended Consequence did not
+become effective.
+
+None of the following is enough by itself:
 
 - execution was not attempted;
-- an adapter rejected the request;
+- the adapter rejected the request;
 - execution returned an error;
 - an API timed out;
 - a response was lost;
 - an acknowledgement was missing;
-- the adapter crashed;
+- the adapter crashed; or
 - transport failed.
 
-`NO_BIND` requires authoritative verification supporting the claim that the intended consequence did not become effective.
+CAGE may assert `NO_BIND` only when authoritative verification supports that
+conclusion.
 
 ---
 
-## Invariant 3 — Uncertainty must remain explicit
+## Invariant 3 — Uncertainty remains explicit
 
-If CAGE cannot establish whether a consequence became effective, the Effect must be:
+When CAGE cannot establish whether the Consequence became effective, the Effect
+is:
 
 ```text
 EFFECT_UNKNOWN
 ```
 
-CAGE must not convert uncertainty into either `BOUND` or `NO_BIND`.
+Uncertainty is preserved rather than converted into either `BOUND` or
+`NO_BIND`.
 
 ---
 
@@ -52,31 +65,32 @@ CAGE must not convert uncertainty into either `BOUND` or `NO_BIND`.
 
 One intended business consequence has one Consequence identity.
 
-The Consequence identity survives:
+That identity survives:
 
 - repeated evaluation;
 - replay;
-- execution attempts;
-- execution retries;
+- multiple ExecutionAttempts;
+- explicitly supported execution retry;
 - reconciliation;
 - agent-session changes;
 - repeated API calls;
-- later verification;
+- later verification; and
 - later Warrants.
 
-A new evaluation Attempt, ExecutionAttempt, verification, Effect, or Warrant does not by itself create a new Consequence.
+Creating a new Attempt, ExecutionAttempt, verification result, Effect, or
+Warrant does not by itself create a new Consequence.
 
 ---
 
 ## Invariant 5 — Evaluation Attempts are distinct
 
-Each evaluation attempt has its own `Attempt` identity.
+Each evaluation has its own `Attempt` identity.
 
 Multiple Attempts may refer to the same Consequence.
 
-An Attempt may reference a previous Attempt identity to preserve replay lineage.
+An Attempt may also reference a previous Attempt to preserve replay lineage.
 
-A Decision belongs to the Attempt that produced it.
+The Decision belongs to the Attempt that produced it.
 
 ---
 
@@ -84,13 +98,12 @@ A Decision belongs to the Attempt that produced it.
 
 Replay creates a new evaluation Attempt for an existing Consequence.
 
-Replay preserves the original Consequence and business intent.
+It preserves the original Consequence and business intent while allowing the
+assurance inputs to be evaluated again.
 
-Replay does not automatically execute the external action.
+A replay may therefore produce a different Decision.
 
-Replay may produce a different Decision when assurance inputs differ.
-
-Therefore:
+Replay does not execute the external operation.
 
 ```text
 replay != execution retry
@@ -101,118 +114,129 @@ replay != reconciliation
 
 ## Invariant 7 — Idempotency is consequence-level safety
 
-Equivalent requests using the same idempotency key must resolve to the same Consequence identity.
+Equivalent requests using the same idempotency key resolve to the same
+Consequence.
 
-The same idempotency key must not silently represent two materially different business consequences.
+The same key cannot silently represent two materially different business
+operations.
 
-Conflicting business intent associated with the same idempotency key must fail explicitly.
+If the business intent conflicts with an existing use of the key, CAGE fails
+explicitly.
 
 Current business-intent equivalence includes:
 
 - action type;
-- principal identity;
-- resource identity;
-- requested effect.
+- Principal identity;
+- Resource identity; and
+- RequestedEffect.
 
-It deliberately does not depend on:
+It does not depend on:
 
-- action identity;
-- proposed consequence identity;
-- agent identity;
+- Action identity;
+- proposed Consequence identity;
+- Agent identity;
 - Attempt identity;
 - agent session;
-- retry number;
+- retry number; or
 - replay number.
+
+The idempotency key identifies the intended business operation, not the
+incidental mechanics around it.
 
 ---
 
-## Invariant 8 — NARROWED carries and executes only an explicit permitted effect
+## Invariant 8 — NARROWED executes only the permitted effect
 
-A `NARROWED` Decision must carry an explicit `permitted_effect`.
+A `NARROWED` Decision carries an explicit `permitted_effect`.
 
-The original requested effect remains preserved for auditability.
+The original RequestedEffect remains preserved for audit and lineage.
 
-Determining whether one effect is more constrained than another is domain-specific and belongs to supplied evaluation logic.
+Determining whether the permitted effect is actually narrower is domain-specific
+and belongs to the supplied evaluation logic.
 
-At custody time, only `permitted_effect` may reach the EffectAdapter.
+At custody time, only `permitted_effect` may reach the `EffectAdapter`.
 
-The broader original requested effect must never be executed for a `NARROWED` Decision.
+The broader original request must not be executed.
 
 ---
 
 ## Invariant 9 — Warrant separates DecisionProof from EffectProof
 
-`DecisionProof` and `EffectProof` are different assurance records.
+`DecisionProof` and `EffectProof` record different assurance facts.
 
-A valid DecisionProof does not establish an EffectProof.
+A valid `DecisionProof` does not establish an `EffectProof`.
 
-A Warrant may legitimately contain a DecisionProof while no EffectProof exists yet.
+A Warrant may legitimately contain a DecisionProof before any EffectProof
+exists.
 
-Absence of an EffectProof is different from an EffectProof whose Effect state is `EFFECT_UNKNOWN`.
+That state is also different from a Warrant containing an EffectProof whose
+Effect is `EFFECT_UNKNOWN`.
+
+No EffectProof means no Effect claim has been established yet.
 
 ---
 
 ## Invariant 10 — Core is domain-neutral
 
-CAGE Core must not contain production business logic specific to:
+Generic CAGE Core must support different business domains without embedding
+their production rules.
 
-- payments;
-- databases;
-- access control;
-- deployment;
-- procurement;
-- any other single business domain.
+Domain-specific logic for areas such as payments, databases, access control,
+deployment, or procurement stays outside the Core.
 
-Domain-specific parameters belong in generic `RequestedEffect` data.
+Domain-specific parameters belong in `RequestedEffect.parameters`.
 
-Domain-specific evaluation semantics belong in supplied evaluation logic.
+Domain-specific evaluation semantics belong in the supplied evaluation rule.
 
-The same generic Core must support materially different consequence types.
+The same Core should be able to govern materially different Consequence types.
 
 ---
 
 ## Invariant 11 — Core is vendor-neutral
 
-CAGE Core must not require or embed assumptions about:
+Generic CAGE Core does not depend on a particular:
 
-- AWS;
-- Azure;
-- GCP;
-- MCP;
-- OpenAI;
-- Anthropic;
-- any specific AI model;
-- any specific agent framework;
-- any specific IAM system;
-- any specific policy engine;
-- any specific policy language;
-- any specific execution provider.
+- cloud provider;
+- AI model;
+- agent framework;
+- IAM system;
+- policy engine;
+- policy language; or
+- execution provider.
 
-Provider-specific information must enter CAGE through normalized contracts or external integration boundaries.
+This includes AWS, Azure, GCP, MCP, OpenAI, and Anthropic.
 
-External identity, policy, approval, observability, risk, execution, and cloud-security systems provide inputs or integrations rather than capabilities CAGE should recreate.
+Provider-specific information enters CAGE through normalized inputs or explicit
+integration boundaries.
+
+Identity, policy, approval, observability, risk, execution, and cloud-security
+platforms remain external systems that CAGE can consume or integrate with.
 
 ---
 
 ## Invariant 12 — No implicit allow
 
-Missing, invalid, incomplete, or untrusted assurance inputs must never cause CAGE Core to implicitly produce permission.
+CAGE does not create permission simply because no failure was detected.
 
-An `ADMITTED` Decision must be explicitly returned by supplied evaluation logic through a valid `EvaluationOutcome`.
+An `ADMITTED` Decision must be returned explicitly by valid supplied evaluation
+logic through an `EvaluationOutcome`.
 
-A missing or invalid EvaluationOutcome must fail rather than default to `ADMITTED`.
+Missing, invalid, incomplete, or untrusted evaluation information must not
+default to `ADMITTED`.
 
-Generic Core does not prescribe which assurance inputs are mandatory for every consequence.
+Generic Core also does not prescribe one universal set of assurance inputs for
+every Consequence.
 
-Those requirements belong to supplied evaluation logic.
+Those requirements belong to the supplied evaluation logic.
 
 ---
 
 ## Invariant 13 — Assurance claims are evidence-bounded
 
-CAGE must never make an assurance claim stronger than the available evidence supports.
+CAGE cannot make a stronger assurance claim than the available evidence
+supports.
 
-Examples:
+For example:
 
 ```text
 ADMITTED          != BOUND
@@ -222,21 +246,21 @@ timeout           != NO_BIND
 adapter success   != BOUND
 ```
 
-Unresolved external state remains:
+If external reality remains unresolved:
 
 ```text
 EFFECT_UNKNOWN
 ```
 
-Absence of an EffectProof is not treated as an Effect assertion.
+The absence of an EffectProof is not itself an Effect assertion.
 
 ---
 
 ## Invariant 14 — Execution requires explicit custody
 
-Evaluation must never automatically execute an external action.
+Evaluation never performs an external mutation automatically.
 
-The following flow is forbidden:
+This flow is not allowed:
 
 ```text
 evaluate_attempt()
@@ -248,43 +272,48 @@ ADMITTED
 automatic external execution
 ```
 
-External mutation may occur only through an explicit custody execution path.
+External execution begins only through an explicit custody path.
 
 ---
 
-## Invariant 15 — The Core must remain locally usable
+## Invariant 15 — Core remains locally usable
 
-CAGE Core must operate locally without CAGE Cloud or any hosted CAGE service.
+CAGE Core must operate as a local library without requiring CAGE Cloud or
+another hosted CAGE service.
 
-Its domain models, evaluation orchestration, replay semantics, idempotency behavior, custody contracts, verification contracts, and proof semantics must not require a hosted CAGE dependency.
+Its domain model, evaluation, replay, idempotency, custody, verification, and
+proof semantics remain usable without a hosted dependency.
 
 ---
 
 ## Invariant 16 — Evaluation consumes normalized assurance inputs
 
-Evaluation may consume normalized:
+Evaluation can consume normalized:
 
 - Evidence;
 - Standing;
 - Delegation;
-- Approval;
+- Approval; and
 - Context.
 
-These objects are passive assurance facts or signals.
+These records carry assurance facts and signals into the evaluation process.
 
-They must not themselves become authorization engines, execution mechanisms, or approval workflows.
+They do not become authorization engines, execution mechanisms, or approval
+workflows themselves.
 
-Supplied evaluation logic interprets them and returns an explicit `EvaluationOutcome`.
+The supplied evaluation logic interprets them and returns an explicit
+`EvaluationOutcome`.
 
 ---
 
-## Invariant 17 — Evaluation is attempt-scoped
+## Invariant 17 — Evaluation is Attempt-scoped
 
-Evaluation occurs against an `Attempt` rather than directly against an Action alone.
+Evaluation happens against an `Attempt`, not directly against an Action alone.
 
 A Decision belongs to the Attempt that produced it.
 
-The same Consequence may receive different Decisions across different Attempts while preserving one stable Consequence identity.
+The same Consequence may therefore receive different Decisions across different
+Attempts while preserving one stable Consequence identity.
 
 For example:
 
@@ -293,75 +322,80 @@ Attempt A1 -> ESCALATED
 Attempt A2 -> ADMITTED
 ```
 
-Both Attempts may still refer to the same Consequence.
+Both Attempts can still refer to the same Consequence.
 
 ---
 
 ## Invariant 18 — DecisionProof records assurance provenance
 
-A `DecisionProof` records the Decision together with stable references to assurance inputs supporting that Decision.
+A `DecisionProof` records the Decision together with stable references to the
+assurance inputs that supported it.
 
 Those references may include:
 
 - Evidence identifiers;
 - Standing identifiers;
 - Delegation identifiers;
-- Approval identifiers;
+- Approval identifiers; and
 - Context identifiers.
 
-DecisionProof does not establish what became true in the external world.
+The proof explains the basis for the Decision.
+
+It does not establish what became true in the external system.
 
 ---
 
-## Invariant 19 — EffectProof requires verification-backed effect establishment
+## Invariant 19 — EffectProof requires verification-backed Effect establishment
 
-`EffectProof` represents an assertion about external reality.
+`EffectProof` records an assurance claim about external reality.
 
-It must remain independent from DecisionProof.
+It remains separate from `DecisionProof` and must be backed by an
+`EffectVerificationResult`.
 
-An EffectProof must be backed by an `EffectVerificationResult`.
+CAGE cannot derive an Effect directly from the Decision state.
 
-CAGE must not manufacture an Effect solely from the Decision state.
-
-In particular:
+These shortcuts are invalid:
 
 ```text
 ADMITTED -> BOUND
 REFUSED  -> NO_BIND
 ```
 
-are forbidden shortcuts.
-
-EffectProof must preserve matching:
+An `EffectProof` must preserve matching:
 
 - Consequence lineage;
 - verification state;
-- Effect state;
+- Effect state; and
 - verification references.
+
+The Effect claim is only as strong as the verification that supports it.
 
 ---
 
 ## Invariant 20 — Evaluation Attempt and ExecutionAttempt are distinct
 
-An evaluation `Attempt` and an `ExecutionAttempt` represent different events.
+An evaluation `Attempt` and an `ExecutionAttempt` describe different events.
 
 An evaluation Attempt means:
 
-> one evaluation of a Consequence.
+> one evaluation of a Consequence
 
 An ExecutionAttempt means:
 
-> one identified attempt to carry an eligible Decision into external execution.
+> one identified attempt to carry an eligible Decision into external execution
 
-They must not share identity semantics or be treated as interchangeable.
+They have separate identities and must not be treated as interchangeable.
+
+This distinction is what allows replay and execution retry to remain separate
+operations.
 
 ---
 
 ## Invariant 21 — Custody eligibility is explicit
 
-Custody must not execute every Decision state.
+Not every Decision may proceed to execution.
 
-Current eligibility is:
+Current custody behavior is:
 
 ```text
 ADMITTED
@@ -376,15 +410,19 @@ REFUSED
     -> custody ineligible
 ```
 
-Ineligible Decisions must fail before adapter invocation.
+Ineligible Decisions stop before adapter invocation.
+
+Custody therefore carries forward only the execution authority represented by
+the Decision.
 
 ---
 
 ## Invariant 22 — ExecutionCapability is scoped
 
-Execution authority must be structurally scoped to the intended custody operation.
+Execution authority is scoped to the custody operation it is intended to
+support.
 
-The current capability scope binds:
+The current capability binds:
 
 ```text
 consequence_id
@@ -392,23 +430,22 @@ action_type
 resource_id
 ```
 
-A capability for another Consequence, action type, or resource must not be reused.
+A capability for another Consequence, action type, or Resource cannot be reused
+for the current execution.
 
-`ExecutionCapability` must not become a credential vault.
+`ExecutionCapability` is not a credential vault.
 
-Provider-specific tokens, secrets, credentials, role material, and permission documents remain outside generic Core.
+Provider-specific tokens, secrets, credentials, roles, and permission
+documents remain outside the generic Core.
 
 ---
 
-## Invariant 23 — EffectAdapter does not decide Effect truth
+## Invariant 23 — EffectAdapter does not determine Effect truth
 
-`EffectAdapter` attempts external mutation.
+`EffectAdapter` attempts the external mutation and reports what it observed
+about that request.
 
-It does not determine whether the external consequence became effective.
-
-Its result is a request-level execution observation only.
-
-The current adapter states are:
+Its states are:
 
 ```text
 ACKNOWLEDGED
@@ -417,7 +454,9 @@ ERROR
 UNKNOWN
 ```
 
-The following mappings are forbidden:
+These are execution observations, not Effect states.
+
+The following direct mappings are invalid:
 
 ```text
 ACKNOWLEDGED -> BOUND
@@ -426,37 +465,44 @@ ERROR        -> NO_BIND
 UNKNOWN      -> EFFECT_UNKNOWN
 ```
 
+External Effect must be established separately through verification.
+
 ---
 
 ## Invariant 24 — Custody validates before execution
 
-Before EffectAdapter invocation, custody must validate:
+Before calling the `EffectAdapter`, custody validates:
 
 - Decision eligibility;
-- exact selected effect;
-- ExecutionCapability scope.
+- the exact selected effect; and
+- `ExecutionCapability` scope.
 
-A custody validation failure must stop execution before adapter invocation.
+If any of those checks fail, execution stops before adapter invocation.
+
+The execution boundary is therefore reached only after the relevant custody
+conditions have been satisfied.
 
 ---
 
 ## Invariant 25 — Adapter result lineage must match custody lineage
 
-An adapter must return an `AdapterExecutionResult`.
+An adapter returns an `AdapterExecutionResult`.
 
-The returned result must refer to the expected ExecutionAttempt.
+That result must refer to the expected `ExecutionAttempt`.
 
-A mismatched result must fail explicitly.
+A result linked to another execution is a contract error and must fail
+explicitly.
 
-Custody must not create an Effect from an adapter result.
+Custody does not repair mismatched lineage and does not create an Effect from
+the adapter result.
 
 ---
 
 ## Invariant 26 — Effect claims require authoritative verification
 
-Only an `EffectVerificationResult` may establish the basis for Effect creation.
+Only an `EffectVerificationResult` can establish the basis for Effect creation.
 
-The verification mapping is:
+The mapping is:
 
 ```text
 VERIFIED_BOUND
@@ -469,13 +515,13 @@ INCONCLUSIVE
     -> EFFECT_UNKNOWN
 ```
 
-There is no direct:
+There is no direct conversion from:
 
 ```text
 AdapterExecutionResult -> Effect
 ```
 
-conversion.
+Execution observation and authoritative verification remain separate stages.
 
 ---
 
@@ -485,19 +531,20 @@ conversion.
 
 `INCONCLUSIVE` may have no references.
 
-A conclusive Effect claim must therefore carry a verification basis.
+A conclusive Effect claim therefore carries an explicit verification basis.
 
 ---
 
 ## Invariant 28 — Reconciliation does not execute
 
-Reconciliation re-checks external reality using an existing `AdapterExecutionResult`.
+Reconciliation re-checks external reality using an existing
+`AdapterExecutionResult`.
 
-It must not:
+It does not:
 
-- invoke an EffectAdapter;
+- invoke an `EffectAdapter`;
 - create another external execution;
-- create an execution retry;
+- create an execution retry; or
 - create an evaluation replay.
 
 Therefore:
@@ -512,31 +559,33 @@ reconciliation != re-execution
 
 ## Invariant 29 — Reconciliation preserves execution lineage
 
-A later reconciliation may produce a new:
+A later reconciliation may create a new:
 
-- EffectVerificationResult;
+- `EffectVerificationResult`;
 - Effect;
-- EffectProof;
+- `EffectProof`; and
 - Warrant.
 
-But it must preserve the same underlying:
+But it preserves the underlying:
 
 - Consequence;
 - evaluation lineage;
-- ExecutionAttempt;
-- AdapterExecutionResult.
+- `ExecutionAttempt`; and
+- `AdapterExecutionResult`.
 
-The later Warrant may reference the earlier Warrant using:
+The new Warrant may link to the earlier one through:
 
 ```text
 previous_warrant_id
 ```
 
+Reconciliation adds a new assurance view without creating a new execution.
+
 ---
 
-## Invariant 30 — Historical assurance must not be rewritten
+## Invariant 30 — Historical assurance is preserved
 
-Later verification must not mutate the meaning of earlier assurance artifacts.
+Later verification does not rewrite the meaning of earlier assurance records.
 
 For example:
 
@@ -553,21 +602,29 @@ Effect = BOUND
 previous_warrant_id = W1
 ```
 
-The earlier uncertainty remains historically valid for the evidence available at that time.
+`W1` remains a valid record of what CAGE could establish at the earlier point
+in time.
+
+`W2` records the later assurance state.
 
 ---
 
-## Invariant 31 — CAGE must not become IAM
+## Invariant 31 — CAGE does not become IAM
 
-CAGE may consume normalized identity, policy, delegation, approval, or constrained execution-authority inputs.
+CAGE may consume normalized identity, delegation, policy, approval, or
+execution-authority information.
 
-It must not recreate provider IAM semantics, credential systems, or authorization platforms inside generic Core.
+It does not recreate provider IAM semantics, credential systems, or
+authorization platforms inside the generic Core.
+
+Those systems remain external sources or integration points.
 
 ---
 
 ## Invariant 32 — v0.6 scope remains disciplined
 
-v0.6 establishes the Generic Consequence Core plus Consequence Custody semantics.
+v0.6 establishes the Generic Consequence Core together with Consequence
+Custody.
 
 It does not require:
 
@@ -579,7 +636,7 @@ It does not require:
 - provider-specific production adapters;
 - MCP integration;
 - provider credential custody;
-- broad execution retry orchestration;
+- general execution-retry orchestration;
 - cryptographic Warrant signatures;
 - canonical Warrant serialization;
 - independent cryptographic Warrant verification;
@@ -589,10 +646,11 @@ It does not require:
 - enterprise deployment;
 - a new IAM system;
 - a new policy language;
-- full consequence graphs;
+- full consequence graphs; or
 - advanced consequence lineage.
 
-Those capabilities belong to later releases or integration packages.
+Those capabilities belong to later releases, separate product layers, or
+integration packages.
 
 ---
 
@@ -609,4 +667,4 @@ Execution           != Verification
 Reconciliation      != Re-execution
 ```
 
-These separations are the foundation of Consequence Custody.
+Together, these separations define the boundary of Consequence Custody.

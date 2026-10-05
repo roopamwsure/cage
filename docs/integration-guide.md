@@ -1,141 +1,501 @@
 # Integrating CAGE v0.7
 
-This guide covers application-owned rules, adapters, verifiers, failures, and
-trust boundaries. For a runnable local sequence, start with the
-[Quickstart](quickstart.md); for the exact signatures and import map, see the
-[public API](v0.7-public-api.md). The examples use disposable fixtures. None
-of them is a production payment, access-control, or database integration.
-For a failure-by-failure recovery reference, see the
-[failure and recovery guide](failure-and-recovery.md).
-For detached Warrant files and CLI validation, see the
-[portable Warrant guide](portable-warrants-and-cli.md).
-For Decision and Effect meanings, see the [semantic guide](semantic-guide.md).
+This guide covers the application-facing boundaries around CAGE: evaluation
+rules, adapters, verifiers, recovery behavior, and trust assumptions.
 
-## Responsibilities at the boundary
+For a runnable local example, start with the
+[Quickstart](quickstart.md).
 
-| Participant | Supplies or checks | Limit |
+For exact signatures and import paths, see the
+[Public API](v0.7-public-api.md).
+
+The examples in this repository use disposable fixtures. They demonstrate the
+integration model; they are not production payment, access-control, or database
+integrations.
+
+For related guidance:
+
+- [Failure and recovery](failure-and-recovery.md)
+- [Portable Warrants and CLI](portable-warrants-and-cli.md)
+- [Decision and Effect semantics](semantic-guide.md)
+
+---
+
+## Who is responsible for what?
+
+CAGE sits between application intent and external execution, but it does not
+own every part of that path.
+
+| Participant | Responsibility | Important limit |
 | --- | --- | --- |
-| Application | The rule, identity and business facts, stable idempotency key, scoped capability, adapter, and verifier | Must route consequential operations through custody; other application paths can bypass this library |
-| CAGE facade | Consequence identity, local dispatch reservation, custody invocation, result and Warrant lineage | In-memory guards belong to one `CAGE` instance; no distributed lock or restart restoration |
-| Adapter | Applies the selected effect to a named target and reports its observation | An acknowledgement or exception cannot establish the final external Effect |
-| Verifier | Independently reads suitable target evidence for this consequence and returns a verification state | A callback can be mistaken or dishonest; CAGE checks its record links, not the truth of its external claims |
-| Target system | Stores the business effect and exposes suitable correlation and observation data | Delays or missing evidence can make verification inconclusive |
+| Application | Supplies the evaluation rule, identities, business facts, stable idempotency key, scoped capability, adapter, and verifier | Other application paths can still bypass CAGE unless the application routes consequential operations through custody |
+| CAGE facade | Preserves Consequence identity, manages local lifecycle guards, invokes custody and verification, and assembles lineage and Warrants | Current guards are in-memory and belong to one `CAGE` instance |
+| Adapter | Applies the selected effect to the target and reports what it observed | Its acknowledgement or failure does not establish the final Effect |
+| Verifier | Reads suitable external evidence and reports what can be established | CAGE validates lineage and structure; it cannot prove that a dishonest or faulty verifier told the truth |
+| Target system | Holds the external business state and exposes evidence that can be correlated to the operation | Delays, weak consistency, or missing evidence may leave the Effect unresolved |
 
-The caller constructs `CAGE(rule=...)`. A rule returns `EvaluationOutcome`,
-including an explicit `DecisionState` and, for a narrowed decision, a
-`RequestedEffect` containing the permitted parameters. A returned `ADMITTED`
-or `NARROWED` Decision is permission to *attempt* the selected effect through
-custody, not a capability or proof of an Effect. The application supplies an
-`ExecutionCapability` scoped to the evaluation's `consequence_id`, action
-type, and resource ID. Custody checks eligibility and scope before invoking
-the adapter. Do not mint an authority merely because a rule admitted an action.
+A typical application creates:
+
+```python
+cage = CAGE(rule=rule)
+```
+
+The rule returns an `EvaluationOutcome`.
+
+For a `NARROWED` Decision, that outcome also carries the permitted
+`RequestedEffect`.
+
+An `ADMITTED` or `NARROWED` Decision gives CAGE permission to move toward
+execution.
+
+It is not itself an execution capability and it is not proof of an Effect.
+
+The application separately supplies an `ExecutionCapability` scoped to:
+
+```text
+consequence_id
+action_type
+resource_id
+```
+
+Custody validates that scope before invoking the adapter.
+
+An application should not manufacture execution authority merely because the
+evaluation returned `ADMITTED`.
+
+---
 
 ## Writing an adapter
 
-Import `EffectAdapter`, `ExecutionAttempt`, `ExecutionCapability`,
-`RequestedEffect`, `AdapterExecutionResult`, and `AdapterExecutionState` from
-`cage.adapters`. An adapter implements:
+Import the adapter contracts from `cage.adapters`.
+
+An adapter implements:
 
 ```python
-def execute(self, *, execution_attempt, effect, capability) -> AdapterExecutionResult:
+def execute(
+    self,
+    *,
+    execution_attempt,
+    effect,
+    capability,
+) -> AdapterExecutionResult:
     ...
 ```
 
-The `effect` argument is the effect selected by custody. On a `NARROWED`
-Decision it is the permitted effect, which can differ from the action's
-original request. Apply exactly that effect. Return an
-`AdapterExecutionResult` with a nonblank `result_id`, the same
-`execution_attempt`, an `AdapterExecutionState`, and useful receipt
-references. `ACKNOWLEDGED`, `REJECTED`, `ERROR`, and `UNKNOWN` are observations;
-none proves `BOUND` or `NO_BIND` by itself. Never substitute a new execution
-attempt or return a result belonging to a different operation.
+The adapter receives:
 
-Use a target-supported operation or idempotency key when available. CAGE's
-local dispatch guard cannot give an external service exactly-once behavior
-after process restart or across CAGE instances. Do not infer from a callback
-exception that the target was not changed.
+- the current `ExecutionAttempt`;
+- the effect selected by custody; and
+- the validated `ExecutionCapability`.
 
-The packaged `cage example database.delete` uses
-[`SQLiteDeleteAdapter`](../src/cage/_sqlite_example.py); `access.grant` shows
-[`SQLiteAccessAdapter`](../src/cage/_access_example.py) receiving a reader
-grant after an administrator request was narrowed. These are small reference
-implementations, not reusable production adapters.
+The `effect` argument is important.
+
+For an `ADMITTED` Decision, it is the original requested effect.
+
+For a `NARROWED` Decision, it is the permitted effect.
+
+The adapter should apply exactly the effect it receives rather than returning
+to the original Action and reconstructing the request independently.
+
+A successful return is an `AdapterExecutionResult` containing:
+
+- a nonblank `result_id`;
+- the same `ExecutionAttempt`;
+- an `AdapterExecutionState`; and
+- any useful receipt or correlation references.
+
+The adapter states are:
+
+```text
+ACKNOWLEDGED
+REJECTED
+ERROR
+UNKNOWN
+```
+
+These describe the execution request.
+
+They do not establish:
+
+```text
+BOUND
+NO_BIND
+EFFECT_UNKNOWN
+```
+
+The adapter also must not substitute another ExecutionAttempt or return a
+result belonging to a different operation.
+
+### External idempotency
+
+When the target supports its own operation ID or idempotency mechanism, use
+it.
+
+CAGE's local dispatch guard protects the lifecycle within a single facade
+instance. It cannot guarantee exactly-once behavior across process restarts,
+multiple application instances, or an external service.
+
+This distinction matters most when the adapter raises after the request may
+already have reached the target.
+
+A callback exception does not prove the external operation failed.
+
+---
+
+## Reference adapters
+
+The repository includes small local examples.
+
+`cage example database.delete` uses
+[`SQLiteDeleteAdapter`](../src/cage/_sqlite_example.py).
+
+The `access.grant` example uses
+[`SQLiteAccessAdapter`](../src/cage/_access_example.py) and demonstrates a
+reader grant being executed after a broader administrator request was
+narrowed.
+
+These implementations are examples of the contract, not production adapters.
+
+---
 
 ## Writing a verifier
 
-Import `EffectVerifier`, `EffectVerificationResult`, `VerificationState`, and
-`AdapterExecutionResult` from `cage.verifiers`. Implement:
+Import the verification contracts from `cage.verifiers`.
+
+A verifier implements:
 
 ```python
-def verify(self, *, adapter_result) -> EffectVerificationResult:
+def verify(
+    self,
+    *,
+    adapter_result,
+) -> EffectVerificationResult:
     ...
 ```
 
-Read target evidence that correlates to the intended consequence, resource,
-and selected effect. Return a unique `verification_id`, the exact input
-`adapter_result`, the verification state, and observation references. For
-`VERIFIED_BOUND` or `VERIFIED_NO_BIND`, provide at least one reference.
-Reading a receipt or repeating the adapter's claimed status alone is not
-independent verification. A separate vendor is not required: for SQLite, a
-separate read connection can observe the same database; for a remote target,
-the read must use its authoritative state or operation status.
+Its job is to examine external evidence for the operation represented by the
+`AdapterExecutionResult`.
 
-To claim `VERIFIED_BOUND`, correlate a durable observation to this operation
-and the permitted effect. To claim `VERIFIED_NO_BIND`, obtain evidence strong
-enough to rule out a delayed completion, including the target's consistency
-and operation-status guarantees. An empty read, unavailable receipt, timeout,
-or transient error can require `INCONCLUSIVE` instead. CAGE maps these states
-to `BOUND`, `NO_BIND`, and `EFFECT_UNKNOWN`, respectively. A verifier must not
-mutate the target to make its observation true.
+A verifier should correlate that evidence to the intended:
 
-The local payment fixture deliberately writes one ledger entry and returns
-adapter `UNKNOWN`. Its first verifier cannot observe the ledger and returns
-`INCONCLUSIVE`; a later verifier reads the existing entry and returns
-`VERIFIED_BOUND`. Run `cage example payment.release` to see the single
-dispatch and linked Warrants. The fixture begins with an empty ledger and
-uses one known invoice and amount; production integrations need a durable
-operation correlation scheme appropriate to their target.
+- Consequence;
+- Resource;
+- selected effect; and
+- external operation or receipt, where the target provides one.
 
-## Failures, observation, and recovery
+It returns:
+
+- a unique `verification_id`;
+- the exact input `adapter_result`;
+- a `VerificationState`; and
+- observation references.
+
+The verification states are:
+
+```text
+VERIFIED_BOUND
+VERIFIED_NO_BIND
+INCONCLUSIVE
+```
+
+`VERIFIED_BOUND` and `VERIFIED_NO_BIND` require at least one verification
+reference.
+
+---
+
+## What counts as independent verification?
+
+Independent verification does not necessarily mean a different vendor or
+service.
+
+It means the Effect is established from external state or operation evidence
+rather than simply repeating the adapter's own conclusion.
+
+For SQLite, that can be a separate read of the same database.
+
+For a remote API, it may be a target-side operation-status endpoint or an
+authoritative read of the resource.
+
+A receipt can be useful evidence, but merely rereading:
+
+```text
+adapter said ACKNOWLEDGED
+```
+
+is not independent verification of the business Effect.
+
+---
+
+## Establishing BOUND
+
+Return `VERIFIED_BOUND` only when the observed evidence supports the claim
+that the permitted Consequence became effective.
+
+Ideally, the verifier can correlate:
+
+```text
+this Consequence
++
+this external operation
++
+this selected effect
++
+this target state
+```
+
+The strength of the verification depends on what the target system exposes.
+
+CAGE preserves the result and its references, but the verifier is responsible
+for interpreting the target correctly.
+
+---
+
+## Establishing NO_BIND
+
+`VERIFIED_NO_BIND` requires stronger evidence than an error or empty response.
+
+The verifier should be able to rule out the intended Consequence becoming
+effective, including any relevant delayed-completion behavior of the target.
+
+For example, these observations may be insufficient by themselves:
+
+```text
+request timed out
+receipt unavailable
+initial read returned nothing
+temporary target error
+```
+
+If the available evidence cannot establish either outcome, return:
+
+```text
+INCONCLUSIVE
+```
+
+CAGE will represent the Effect as:
+
+```text
+EFFECT_UNKNOWN
+```
+
+A verifier should never mutate the target in order to make its observation
+true.
+
+---
+
+## Reconciliation
+
+Reconciliation is useful when the first verification cannot establish the
+Effect.
+
+The flow is:
+
+```text
+existing execution
+    |
+    v
+first verification = INCONCLUSIVE
+    |
+    v
+Effect = EFFECT_UNKNOWN
+    |
+    v
+later evidence becomes available
+    |
+    v
+reconcile()
+    |
+    v
+new verification
+```
+
+The important point is that reconciliation does not invoke the adapter again.
+
+It observes the same execution.
+
+The local payment example demonstrates this behavior.
+
+The fixture performs one external write and returns adapter state `UNKNOWN`.
+
+The first verifier cannot observe the ledger and returns `INCONCLUSIVE`.
+
+A later verifier reads the existing ledger entry and returns
+`VERIFIED_BOUND`.
+
+Run:
+
+```text
+cage example payment.release
+```
+
+to see the single dispatch and linked Warrants.
+
+Production integrations should use a durable correlation mechanism appropriate
+to the target rather than relying on the fixture's in-memory assumptions.
+
+---
+
+## Failure and recovery
 
 Normal Decision, adapter, and verification states are returned as typed
-outcomes. Error handling depends on when the failure occurs:
+results.
 
-| Situation | What the application can do |
+Exceptions represent failures in SDK usage, callback execution, contract
+validation, or local assembly.
+
+The recovery action depends on where the failure happened.
+
+| Situation | Recommended response |
 | --- | --- |
-| Ineligible Decision or mismatched capability | Correct the input or authority; custody has not invoked the adapter |
-| Conflicting idempotency key | Resolve the request identity; do not treat a new key as a safe retry of the old operation |
-| Adapter exception, invalid return, or mismatched result | Catch `AdapterInvocationError`, `AdapterContractError`, or `AdapterResultMismatchError`; inspect `error.execution` and verify it without dispatching again |
-| Verifier exception or invalid return | Catch the relevant `VerifierInvocationError`, `VerifierContractError`, or `VerificationResultMismatchError`; observe again with `verify(error.execution, ...)` |
-| Failed reconciliation | Use `error.previous` and `error.execution` to inspect the prior snapshot and original execution; retry only observation with `reconcile(error.previous, ...)` |
-| Assembly failure after a valid verification | `AssuranceAssemblyError` retains `execution`, `verification`, `stage`, and, during reconciliation, `previous` |
+| Ineligible Decision or capability mismatch | Correct the input or authority; the adapter has not been invoked |
+| Idempotency conflict | Resolve the business intent rather than treating a new key as a safe retry |
+| Adapter exception or invalid adapter result | Inspect `error.execution` and verify the preserved execution without dispatching again |
+| Verifier exception or invalid verification result | Use the retained execution context and observe again with a corrected verifier |
+| Reconciliation failure | Use the retained `previous` snapshot and retry observation only |
+| Assurance assembly failure | Inspect the retained verification and assembly stage before deciding how to proceed |
 
-If the adapter could have been entered, CAGE consumes its local dispatch
-reservation even if it raised. An error's `execution` may contain an SDK
-recovery observation with adapter state `UNKNOWN` and origin `SDK_RECOVERY`.
-That marker records missing usable adapter output; it is not a receipt from
-the target. `verify(error.execution, verifier=...)` performs observation
-without another dispatch. A valid but inconclusive first observation returns
-an `AssuranceResult`; use `reconcile(previous, verifier=...)` to observe again
-and link the new Warrant to the preceding one. Within one facade instance,
-one completed first verification and one successor per predecessor are
-reserved. Restarting loses those local reservations.
+If adapter entry may have occurred, CAGE consumes the local dispatch
+reservation even when the callback raises.
 
-Do not use a parsed portable Warrant to resume execution. `parse_warrant()`
-and `load_warrant()` return detached inspection data, not an
-`ExecutionResult` or an executable capability. SUMMARY hides specified
-business fields and references; FULL can contain sensitive business data.
-`validate_warrant()` checks structure and consistency, not authenticity,
-current target state, or cryptographic integrity. Keep target credentials out
-of references and diagnostics and protect any exported files appropriately.
+The retained execution may contain a recovery observation with:
+
+```text
+state  = UNKNOWN
+origin = SDK_RECOVERY
+```
+
+That marker means the SDK lacks a usable adapter result.
+
+It is not an external receipt.
+
+Use:
+
+```python
+cage.verify(error.execution, verifier=...)
+```
+
+to investigate without causing another dispatch.
+
+For the complete failure matrix, see
+[Failure and recovery](failure-and-recovery.md).
+
+---
+
+## Trust boundaries
+
+CAGE can validate its own contracts and lineage.
+
+It cannot independently prove that every external input is truthful.
+
+For example:
+
+- an application can supply incorrect identity or business facts;
+- an adapter can misreport what the target returned;
+- a verifier can implement weak or incorrect verification logic;
+- a target can expose stale or eventually consistent state.
+
+CAGE therefore treats trust boundaries explicitly.
+
+The SDK can verify that an `EffectVerificationResult` belongs to the expected
+adapter result and that proof lineage is internally consistent.
+
+It cannot determine whether the verifier's external observation was honest or
+whether the target's evidence was authoritative enough for the application's
+risk model.
+
+That judgment belongs to the integration.
+
+---
+
+## Portable Warrants are not restart state
+
+A parsed portable Warrant is detached assurance data.
+
+It is not:
+
+```text
+ExecutionResult
+ExecutionCapability
+live facade state
+restart context
+```
+
+Do not use a portable Warrant to resume or reconstruct execution.
+
+`SUMMARY` disclosure omits selected business fields and references.
+
+`FULL` disclosure can contain sensitive business data.
+
+`validate_warrant()` checks structural and semantic consistency of the portable
+record.
+
+It does not establish:
+
+- authenticity;
+- cryptographic integrity;
+- current external state; or
+- truth of the verifier's claims.
+
+Keep secrets and provider credentials out of Warrant references and
+diagnostics.
+
+Protect exported Warrant files according to the sensitivity of the information
+they contain.
+
+---
+
+## Local lifecycle limits
+
+The current facade keeps its idempotency registry and dispatch, verification,
+and reconciliation reservations in memory.
+
+Those guards apply to:
+
+```text
+one Python process
++
+one CAGE instance
+```
+
+They are not distributed locks.
+
+A process restart does not restore them automatically.
+
+Applications that need durable recovery should maintain their own durable
+operation correlation and use target-side evidence to determine what happened
+after an interruption.
+
+CAGE v0.7 does not claim distributed exactly-once execution.
+
+---
 
 ## Low-level API and compatibility
 
-`cage.core.*` remains available for applications that own the full lifecycle.
-`cage.rules`, `cage.adapters`, `cage.verifiers`, `cage.results`, and
-`cage.warrants` re-export the supported contracts without copying core
-classes. The facade orchestrates the existing custody and verification
-functions; it does not replace their Decision/Effect semantics. Existing
-v0.6 applications can keep their low-level imports. Adopt the facade and
-portable v1 format explicitly; a format-version change, if needed, requires
-separate migration guidance.
+Applications that already own the full lifecycle can continue using
+`cage.core.*`.
+
+The following modules expose supported contracts for developer-facing use:
+
+```text
+cage.rules
+cage.adapters
+cage.verifiers
+cage.results
+cage.warrants
+```
+
+These modules re-export the existing Core contracts rather than defining
+parallel models.
+
+The `CAGE` facade orchestrates the existing evaluation, custody, verification,
+reconciliation, and Warrant behavior.
+
+It does not replace the underlying Decision or Effect semantics.
+
+Existing v0.6 applications can continue using the low-level API.
+
+Adoption of the facade and portable Warrant format is explicit rather than
+required for compatibility.
+
+Any future portable-format version change should include separate migration
+guidance.
