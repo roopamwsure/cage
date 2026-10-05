@@ -19,23 +19,20 @@ Those systems may become assurance inputs, adapters, evidence sources, execution
 
 The source code is licensed under [Apache License 2.0](LICENSE).
 
-The v0.7 developer SDK is released. The current package release is
-`v0.7.1`, which adds PyPI distribution metadata and Trusted Publishing
-without changing runtime semantics from `v0.7.0`. To run the
-local SQLite example from a source checkout, see the
-[v0.7 Quickstart](docs/quickstart.md).
-See the [integration guide](docs/integration-guide.md) for adapter, verifier,
-failure-recovery, and trust-boundary guidance, and the
-[release readiness review](docs/v0.7-release-readiness.md) for remaining gates.
-For errors and uncertain outcomes, see the
-[failure and recovery guide](docs/failure-and-recovery.md).
-For portable JSON Warrants and CLI inspection, see the
-[portable Warrant guide](docs/portable-warrants-and-cli.md).
-For the meaning of Decisions, execution observations, and Effects, see the
-[semantic guide](docs/semantic-guide.md).
-For proposed changes and security reports, see
-[CONTRIBUTING.md](CONTRIBUTING.md) and [SECURITY.md](SECURITY.md). Development
-changes are summarized in the [changelog](CHANGELOG.md).
+The v0.7 developer SDK is released, and the current package version is
+`v0.7.1`. This patch adds PyPI metadata and Trusted Publishing; the runtime
+semantics are unchanged from `v0.7.0`.
+
+If you are starting from the source checkout, begin with the
+[v0.7 Quickstart](docs/quickstart.md). The
+[integration guide](docs/integration-guide.md) covers adapters, verifiers, and
+trust boundaries. Use the [failure and recovery guide](docs/failure-and-recovery.md)
+for uncertain outcomes, the [portable Warrant guide](docs/portable-warrants-and-cli.md)
+for JSON export and CLI inspection, and the [semantic guide](docs/semantic-guide.md)
+for Decision and Effect terminology. Release evidence is recorded in the
+[release readiness review](docs/v0.7-release-readiness.md). Project changes and
+security guidance are in [CONTRIBUTING.md](CONTRIBUTING.md),
+[SECURITY.md](SECURITY.md), and the [changelog](CHANGELOG.md).
 
 Release status:
 
